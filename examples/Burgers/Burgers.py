@@ -132,7 +132,7 @@ def Burgers_variable_nu(u, u_old, mesh, dt, t, nu):
     return res
 
 
-def solve_Burgers(sol, x_mesh, t_mesh, nu, eq_type=None, TOL=1e-5, k_max=5000):
+def solve_Burgers(sol, x_mesh, t_mesh, nu, eq_type=None, TOL=1e-5, k_max=5000, WRITE_LOG=True):
     N_t = t_mesh.shape[0]
     N_x = x_mesh.shape[0]
     dt = t_mesh[1] - t_mesh[0]
@@ -166,9 +166,10 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, eq_type=None, TOL=1e-5, k_max=5000):
         case _:
             raise ValueError('Unknown equation')
     
-    solver_table = PrettyTable()
-    solver_table.title = title
-    solver_table.field_names = ['t [s]', 'Max residual u [m/s]', 'Iterations']
+    if WRITE_LOG:
+        solver_table = PrettyTable()
+        solver_table.title = title
+        solver_table.field_names = ['t [s]', 'Max residual u [m/s]', 'Iterations']
     max_res = np.zeros(shape=(N_t, ))
     for j in range(1, N_t):
         t = t_mesh[j]
@@ -185,26 +186,28 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, eq_type=None, TOL=1e-5, k_max=5000):
         max_res[j] = err
         sol[j,:] = u.copy()
         
-        solver_table.add_row([f'{t:.6f}', f'{err:.5e}', f'{k}'])
-        # the 1st time, print the header too
-        if j == 1:
-            # remove last line from the header, to avoid double line of ------- only
-            header = solver_table.get_string(header=True)
-            # split the single string into its different lines (separated by '\n')
-            # and glue all-but-the-last together
-            header = '\n'.join(header.split('\n')[0:-1])
-            print(header)
-        else:
-            # select the newly-added row (index j-1, since the 1st row
-            # corrspoending to j = 1 has index 0) and print only the
-            # numerical values (row -2 becaue the last row is the ruler)
-            row = solver_table.get_string(start=j-1, border=True)
-            print(row.split('\n')[-2])
-        
-        if err >= TOL:
-            print(f'Solver did not converge for t = {t} s, max residual: {err:.5e} m/s')
-    # once the loop has finished, print the bottom ruler
-    print(row.split('\n')[-1])
+        if WRITE_LOG:
+            solver_table.add_row([f'{t:.6f}', f'{err:.5e}', f'{k}'])
+            # the 1st time, print the header too
+            if j == 1:
+                # remove last line from the header, to avoid double line of ------- only
+                header = solver_table.get_string(header=True)
+                # split the single string into its different lines (separated by '\n')
+                # and glue all-but-the-last together
+                header = '\n'.join(header.split('\n')[0:-1])
+                print(header)
+            else:
+                # select the newly-added row (index j-1, since the 1st row
+                # corrspoending to j = 1 has index 0) and print only the
+                # numerical values (row -2 becaue the last row is the ruler)
+                row = solver_table.get_string(start=j-1, border=True)
+                print(row.split('\n')[-2])
+            
+            if err >= TOL:
+                print(f'Solver did not converge for t = {t} s, max residual: {err:.5e} m/s')
+    if WRITE_LOG:
+        # once the loop has finished, print the bottom ruler
+        print(row.split('\n')[-1])
     return sol, max_res
 
 
