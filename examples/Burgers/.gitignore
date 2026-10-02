@@ -1,2 +1,6 @@
+# mesh and solution data
 *.mesh
 *.dat
+
+# dump script to test snippets
+DUMP.py

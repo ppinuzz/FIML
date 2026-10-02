@@ -99,10 +99,6 @@ np.savetxt(mesh_file_var_nu, x_mesh, delimiter=', ',
 
 #%% SOLVE THE EQUATION
 
-
-
-
-
 if SOLVE:
     # apply ICs and BCs
     sol_basic[0,:] = u_IC(x_mesh)
