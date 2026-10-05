@@ -16,6 +16,7 @@ import inspect
 from timeit import default_timer as timer
 from datetime import timedelta
 import sys
+import cloudpickle
 import burgers
 
 
@@ -45,8 +46,8 @@ x0 = 0
 xL = L
 
 # discretisation steps
-dt = 1e-3   # [s]
-dx = 1e-3   # [m]
+dt = 3.125e-4   # [s]
+dx = 7.813e-5   # [m]
 
 # initial and boundary conditions
 u_IC = lambda x: np.sin(np.pi*x/L)
@@ -123,7 +124,17 @@ if SOLVE:
                        f'x in [0,1], t in [0, {T}], nu0 = {nu0} m2/s\n'
                        f'{header_IC}\n'
                        'Each row contains the full solution for the i-th time instant\n'
-                       't [s], max_res [m/s], u_j [m/s]'))
+                       't [s], max_res [m/s2], u_j [m/s]'))
+    sol_file_basic_npz = Path(f'{sol_file_basic.stem}.npz')
+    print(f'Saving solution to \n\t{sol_file_basic_npz.resolve()}')
+    header = ('Solution of Burgers equation with constant viscosity\n'
+              f'x in [0,1], t in [0, {T}], nu0 = {nu0} m2/s\n'
+              f'{header_IC}\n'
+              'x [m], t [s], max_res [m/s2], u [m/s]')
+    np.savez_compressed(sol_file_basic_npz, x_mesh=x_mesh, t_mesh=t_mesh, 
+                        L=L, T=T, nu=cloudpickle.dumps(nu0_fun), uL=uL, u0=u0, 
+                        u_IC=cloudpickle.dumps(u_IC), max_res=max_res_basic, 
+                        solution=sol_basic, description=header)
     
     # VARIABLE VISCOSITY BURGERS' EQUATION
     start_time = timer()
@@ -141,6 +152,16 @@ if SOLVE:
                        f'{header_nu}\n'
                        'Each row contains the full solution for the i-th time instant\n'
                        't [s], max_res [m/s], u_j [m/s]'))
+    sol_file_var_nu = Path(f'{sol_file_var_nu.stem}.npz')
+    print(f'Saving solution to \n\t{sol_file_var_nu.resolve()}')
+    header = ('Solution of Burgers equation with variable viscosity\n'
+              f'x in [0,1], t in [0, {T}], nu = nu(x,t) m2/s, nu0 = {nu0} m2/s\n'
+              f'{header_IC}\n'
+              'x [m], t [s], max_res [m/s2], u [m/s]')
+    np.savez_compressed(sol_file_var_nu, x_mesh=x_mesh, t_mesh=t_mesh, 
+                        L=L, T=T, nu=cloudpickle.dumps(nu), uL=uL, u0=u0, 
+                        u_IC=cloudpickle.dumps(u_IC), max_res=max_res_var_nu, 
+                        solution=sol_var_nu, description=header)
 else:
     data = np.loadtxt(sol_file_basic, delimiter=',')
     t_mesh = data[:,0]
