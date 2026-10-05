@@ -3,7 +3,6 @@
 Functions to solve Burgers' equation.
 
 @author: Andrea Pinardi <andrea.pinardi@polimi.it>
-                        <andreapinardi319@gmail.com>
 """
 
 import numpy as np
