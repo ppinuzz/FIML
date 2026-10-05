@@ -16,7 +16,7 @@ import inspect
 from timeit import default_timer as timer
 from datetime import timedelta
 import sys
-from burgers import *
+import burgers
 
 
 #%% USER INPUT
@@ -38,8 +38,7 @@ if len(sys.argv) > 1:
 
 # space-time domain size
 L = 1           # [m]
-#T = 1           # [s]
-T = 0.1           # [s]
+T = 1           # [s]
 nu0 = 1e-2      # [m2/s]
 
 x0 = 0
@@ -110,7 +109,7 @@ if SOLVE:
     
     # BASIC BURGERS' EQUATION
     start_time = timer()
-    sol_basic, max_res_basic = solve_Burgers(sol_basic, x_mesh, t_mesh, nu=nu0_fun, eq_type='basic')
+    sol_basic, max_res_basic = burgers.solve_Burgers(sol_basic, x_mesh, t_mesh, nu=nu0_fun, eq_type='basic')
     end_time = timer()
     time_basic = end_time - start_time
     print(f'Elapsed time: {time_basic} s ({timedelta(seconds=time_basic)} hours)')
@@ -128,7 +127,7 @@ if SOLVE:
     
     # VARIABLE VISCOSITY BURGERS' EQUATION
     start_time = timer()
-    sol_var_nu, max_res_var_nu = solve_Burgers(sol_var_nu, x_mesh, t_mesh, nu=nu, eq_type='variable_nu')
+    sol_var_nu, max_res_var_nu = burgers.solve_Burgers(sol_var_nu, x_mesh, t_mesh, nu=nu, eq_type='variable_nu')
     end_time = timer()
     time_var_nu = end_time - start_time
     print(f'Elapsed time: {time_var_nu} s ({timedelta(seconds=time_var_nu)} hours)')
