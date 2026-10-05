@@ -13,6 +13,7 @@ from timeit import default_timer as timer
 from datetime import timedelta
 import sys
 import burgers
+from prettytable import PrettyTable
 
 # =============================================================================
 # turbo_pkg = Path(r'C:\Andrea\Dottorato\TurboPlotUtils')
@@ -27,8 +28,8 @@ import burgers
 # discretisation steps
 # 1st order in time, 2nd order in space => decrease dx by 1/2 and dt by 1/4
 # to keep the same refinement [Etienne2009]
-dt_vet = [5e-3, 1.25e-3, 0.3125e-3]   # [s]
-dx_vet = [2.5e-3, 1.25e-3, 0.625e-3]     # [m]
+dt_vet = [5e-3, 1.25e-3, 3.125e-4, 7.8125e-5]   # [s]
+dx_vet = [2.5e-3, 1.25e-3, 6.25e-4, 3.125e-4]   # [m]
 
 
 #%% USER INPUT - CASE SETUP
@@ -68,11 +69,11 @@ nu0_fun = lambda x, t: nu0
 out_dir = Path('grid_convergence')
 out_dir.mkdir(exist_ok=True)
 
-sol_file_basic = Path('basic.dat')
-sol_file_var_nu = Path('variable_nu.dat')
+sol_file_basic = Path('basic')
+sol_file_var_nu = Path('variable_nu')
 
-mesh_file_basic = Path('basic.mesh')
-mesh_file_var_nu = Path('variable_nu.mesh')
+mesh_file_basic = Path('basic')
+mesh_file_var_nu = Path('variable_nu')
 
 
 #%% SOLVE
@@ -83,8 +84,8 @@ if SOLVE:
             # CREATE THE MESH
             print(f'--- MESH SIZE: dx = {dx} m, TIME STEP: dt = {dt} s ---')
             
-            mesh_file_basic_i = out_dir / f'{mesh_file_basic.stem}_dx{dx}_dt{dt}{mesh_file_basic.suffix}'
-            mesh_file_var_nu_i = out_dir / f'{mesh_file_var_nu.stem}_dx{dx}_dt{dt}{mesh_file_var_nu.suffix}'
+            mesh_file_basic_i = out_dir / f'{mesh_file_basic.stem}_dx{dx}_dt{dt}.mesh'
+            mesh_file_var_nu_i = out_dir / f'{mesh_file_var_nu.stem}_dx{dx}_dt{dt}.mesh'
             
             # N intervals => N + 1 points
             N_x = int(np.ceil((xL-x0)/dx)) + 1
@@ -93,21 +94,10 @@ if SOLVE:
             t_mesh = np.linspace(0, T, N_t)
             sol_basic = np.zeros(shape=(N_t, N_x))
             sol_var_nu = np.zeros(shape=(N_t, N_x))
-            
-            print(f'Writing mesh to \n\t{mesh_file_basic_i.resolve()}')
-            np.savetxt(mesh_file_basic_i, x_mesh, delimiter=', ',
-                       header=('Mesh for Burgers equation with constant viscosity\n'
-                               f'dx = {dx} m\n'
-                               'x [m]'))
-            print(f'Writing mesh to \n\t{mesh_file_var_nu_i.resolve()}')
-            np.savetxt(mesh_file_var_nu_i, x_mesh, delimiter=', ',
-                       header=('Mesh for Burgers equation with variable viscosity\n'
-                               f'dx = {dx} m\n'
-                               'x [m]'))
         
             # SOLVE THE EQUATIONS
-            sol_file_basic_i = out_dir / f'{sol_file_basic.stem}_dx{dx}_dt{dt}{sol_file_basic.suffix}'
-            sol_var_nu_i = out_dir / f'{sol_file_var_nu.stem}_dx{dx}_dt{dt}{sol_file_var_nu.suffix}'
+            sol_file_basic_i = out_dir / f'{sol_file_basic.stem}_dx{dx}_dt{dt}.dat'
+            sol_var_nu_i = out_dir / f'{sol_file_var_nu.stem}_dx{dx}_dt{dt}.dat'
             if SOLVE:
                 # apply ICs and BCs
                 sol_basic[0,:] = u_IC(x_mesh)
@@ -123,17 +113,6 @@ if SOLVE:
                 end_time = timer()
                 time_basic = end_time - start_time
                 print(f'Elapsed time: {time_basic} s ({timedelta(seconds=time_basic)} hours)')
-                print(f'Saving solution to \n\t{sol_file_basic_i.resolve()}')
-                # obtain a string representation of the lambda function used for u(x,0):
-                #   'u_IC = lambda x: np.sin(np.pi*x/L)'
-                header_IC = inspect.getsourcelines(u_IC)[0][0].strip()
-                np.savetxt(sol_file_basic_i, 
-                           np.column_stack((t_mesh, max_res_basic, sol_basic)), delimiter=', ',
-                           header=('Solution of Burgers equation with constant viscosity\n'
-                                   f'x in [0,1], t in [0, {T}], nu0 = {nu0} m2/s\n'
-                                   f'{header_IC}\n'
-                                   'Each row contains the full solution for the i-th time instant\n'
-                                   't [s], max_res [m/s], u_j [m/s]'))
                 
                 # VARIABLE VISCOSITY BURGERS' EQUATION
                 start_time = timer()
@@ -141,17 +120,20 @@ if SOLVE:
                 end_time = timer()
                 time_var_nu = end_time - start_time
                 print(f'Elapsed time: {time_var_nu} s ({timedelta(seconds=time_var_nu)} hours)')
-                print(f'Saving solution to \n\t{sol_var_nu_i.resolve()}')
-                header_nu = inspect.getsourcelines(nu)[0][0].strip()
-                np.savetxt(sol_var_nu_i, 
-                           np.column_stack((t_mesh, max_res_var_nu, sol_var_nu)), delimiter=', ',
-                           header=('Solution of Burgers equation with variable viscosity\n'
-                                   f'x in [0,1], t in [0, {T}], nu = nu(x,t) m2/s\n, nu0 = {nu0} m2/s\n'
-                                   f'{header_IC}\n'
-                                   f'{header_nu}\n'
-                                   'Each row contains the full solution for the i-th time instant\n'
-                                   't [s], max_res [m/s], u_j [m/s]'))
+                
+                filename = out_dir / f'basic_dx{dx}_dt{dt}.npz'
+                np.savez_compressed(filename, x_mesh=x_mesh, t_mesh=t_mesh, 
+                                    max_res=max_res_basic, solution=sol_basic,
+                                    duration=time_basic)
+                filename = out_dir / f'variable_nu_dx{dx}_dt{dt}.npz'
+                np.savez_compressed(filename, x_mesh=x_mesh, t_mesh=t_mesh, 
+                                    max_res=max_res_var_nu, solution=sol_var_nu,
+                                    duration=time_var_nu)
 else:
+    runtime_table = PrettyTable()
+    runtime_table.title = 'Variable viscosity - Runtime [s]'
+    runtime_table.field_names = [''] + [f'dt {dt:.3e}' for dt in dt_vet]
+    
     # GCI POSPROCESSING
     meshes_basic = {}
     meshes_var_nu = {}
@@ -162,36 +144,26 @@ else:
         meshes_var_nu[dx] = {}
         solutions_basic[dx] = {}
         solutions_var_nu[dx] = {}
+        row = [f'dx {dx:.3e}']
         for dt in dt_vet:
-            # READ MESHES
-            mesh_file_basic_i = out_dir / f'{mesh_file_basic.stem}_dx{dx}_dt{dt}{mesh_file_basic.suffix}'
-            print(f'Reading mesh file \n\t{mesh_file_basic_i.resolve()}')
-            mesh = np.loadtxt(mesh_file_basic_i, delimiter=',')
-            meshes_basic[dx][dt] = mesh.copy()
+            filename = out_dir / f'basic_dx{dx}_dt{dt}.npz'
+            data = np.load(filename)
+            meshes_basic[dx][dt] = data['x_mesh']
+            solutions_basic[dx][dt] = data['solution']
             
-            mesh_file_var_nu_i = out_dir / f'{mesh_file_var_nu.stem}_dx{dx}_dt{dt}{mesh_file_var_nu.suffix}'
-            print(f'Reading mesh file \n\t{mesh_file_var_nu_i.resolve()}')
-            mesh = np.loadtxt(mesh_file_var_nu_i, delimiter=',')
-            meshes_var_nu[dx][dt] = mesh.copy()
-            
-            # READ SOLUTIONS
-            sol_file_basic_i = out_dir / f'{sol_file_basic.stem}_dx{dx}_dt{dt}{sol_file_basic.suffix}'
-            print(f'Reading solution file \n\t{sol_file_basic_i.resolve()}')
-            sol = np.loadtxt(sol_file_basic_i, delimiter=',')
-            solutions_basic[dx][dt] = sol.copy()
-            
-            sol_var_nu_i = out_dir / f'{sol_file_var_nu.stem}_dx{dx}_dt{dt}{sol_file_var_nu.suffix}'
-            print(f'Reading solution file \n\t{sol_var_nu_i.resolve()}')
-            sol = np.loadtxt(sol_var_nu_i, delimiter=',')
-            solutions_var_nu[dx][dt] = sol.copy()
-    
+            filename = out_dir / f'variable_nu_dx{dx}_dt{dt}.npz'
+            data = np.load(filename)
+            meshes_var_nu[dx][dt] = data['x_mesh']
+            solutions_var_nu[dx][dt] = data['solution']
+            row.append(f"{data['duration']:.2f}")
+        runtime_table.add_row(row)
 
     plt.figure()
     for dx, dt in zip(dx_vet, dt_vet):
         mesh = meshes_basic[dx][dt]
         sol = solutions_basic[dx][dt]
         # 0th column: time, 1st column: mas residual, 2nd+ columns: solution
-        plt.plot(mesh, sol[-1,2:], label=rf'$\Delta x = {dx*1e3}$ mm, $\Delta t = {dt}$ s')
+        plt.plot(mesh, sol[-1,:], label=rf'$\Delta x = {dx*1e3}$ mm, $\Delta t = {dt}$ s')
     plt.xlabel('$x$ [m]')
     plt.ylabel('$u$ [m/s]')
     plt.autoscale(enable=True, axis='x', tight=True)
@@ -205,7 +177,7 @@ else:
         mesh = meshes_var_nu[dx][dt]
         sol = solutions_var_nu[dx][dt]
         # 0th column: time, 1st column: mas residual, 2nd+ columns: solution
-        plt.plot(mesh, sol[-1,2:], label=rf'$\Delta x = {dx*1e3}$ mm, $\Delta t = {dt}$ s')
+        plt.plot(mesh, sol[-1,:], label=rf'$\Delta x = {dx*1e3}$ mm, $\Delta t = {dt}$ s')
     plt.xlabel('$x$ [m]')
     plt.ylabel('$u$ [m/s]')
     plt.autoscale(enable=True, axis='x', tight=True)
@@ -213,3 +185,5 @@ else:
     plt.title(rf'Variable viscosity Burgers ($\nu = \nu(x,t)$), $t = {sol[-1,0]}$ s')
     # non blocking, so that it won't wait for the user to close the window
     plt.show(block=False)
+    
+    print(runtime_table)
