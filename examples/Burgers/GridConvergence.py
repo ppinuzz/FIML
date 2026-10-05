@@ -163,7 +163,7 @@ else:
         mesh = meshes_basic[dx][dt]
         sol = solutions_basic[dx][dt]
         # 0th column: time, 1st column: mas residual, 2nd+ columns: solution
-        plt.plot(mesh, sol[-1,:], label=rf'$\Delta x = {dx*1e3}$ mm, $\Delta t = {dt}$ s')
+        plt.plot(mesh, sol[-1,:], label=rf'$\Delta x = {dx*1e3}$ mm, $\Delta t = {dt:.3f}$ s')
     plt.xlabel('$x$ [m]')
     plt.ylabel('$u$ [m/s]')
     plt.autoscale(enable=True, axis='x', tight=True)
@@ -177,7 +177,7 @@ else:
         mesh = meshes_var_nu[dx][dt]
         sol = solutions_var_nu[dx][dt]
         # 0th column: time, 1st column: mas residual, 2nd+ columns: solution
-        plt.plot(mesh, sol[-1,:], label=rf'$\Delta x = {dx*1e3}$ mm, $\Delta t = {dt}$ s')
+        plt.plot(mesh, sol[-1,:], label=rf'$\Delta x = {dx*1e3}$ mm, $\Delta t = {dt:.3f}$ s')
     plt.xlabel('$x$ [m]')
     plt.ylabel('$u$ [m/s]')
     plt.autoscale(enable=True, axis='x', tight=True)
@@ -187,3 +187,22 @@ else:
     plt.show(block=False)
     
     print(runtime_table)
+
+
+#%% CALCULATE MAX DISCREPANCY W.R.T. FINER SOLUTION AT T = T_FINAL
+
+max_error = PrettyTable()
+max_error.title = 'Max. discrepancy w.r.t. finer solution [%]'
+max_error.field_names = [''] + [f'dt {dt:.3e}' for dt in dt_vet]
+finer_sol = solutions_var_nu[min(dx_vet)][min(dt_vet)]
+finer_sol_mesh = meshes_var_nu[min(dx_vet)][min(dt_vet)]
+for dx in dx_vet:
+    row = [f'dx {dx:.3e}']
+    for dt in dt_vet:
+        sol = solutions_var_nu[dx][dt][-1,:]
+        finer_interp = np.interp(meshes_var_nu[dx][dt], finer_sol_mesh, finer_sol[-1,:])
+        # at BCs, u(0,t) = u(1,t) = 0, leading to 0/0 => ignore the NaN
+        max_err = np.nanmax(np.abs((sol - finer_interp) / finer_interp))
+        row.append(f'{100*np.abs(max_err).max():.2f}')
+    max_error.add_row(row)
+print(max_error)
