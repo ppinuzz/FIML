@@ -51,3 +51,28 @@ def create_basis_functions(N_basis, p=3, N_t=500, PLOT=False):
         plt.show()
     
     return B
+
+
+def cost_function(beta, d, h_beta, Cm, Cbeta, beta_prior):
+    sol_beta = h_beta(beta)
+    cost_data = _quadratic_form(d-sol_beta, Cm)
+    cost_beta = _quadratic_form(beta-beta_prior, Cbeta)
+    J = cost_data + cost_beta
+    return J
+
+
+def _quadratic_form(x, A):
+    if np.isscalar(A):
+        # scalar matrix: A = a * I, then A^-1 = (1/a) I
+        # x^TAx = x^T(I/a)x = (1/a) x^Tx = (1/a) ||x||^2
+        Q = 0.5 * np.linalg.norm(x)**2 / A**2 
+    else:
+        # vector of diagonal elements
+        A_diag = np.diagonal(A)
+        if np.array_equal(A, np.diag(A_diag)):
+            # diagonal matrix
+            A_inv = (1 / A_diag) * np.identity(A.shape[0])
+        else:
+            A_inv = np.linalg.inv(A)
+        Q = 0.5 * x.T @ A_inv @ x
+    return Q
