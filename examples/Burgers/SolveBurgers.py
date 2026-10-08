@@ -24,18 +24,7 @@ import burgers
 
 VIDEO = False
 SOLVE = False
-
-if len(sys.argv) > 1:
-    for j in range(1, len(sys.argv)):
-        match sys.argv[j]:
-            case '--solve':
-                SOLVE = True
-            case '--post':
-                SOLVE = False
-            case '--video':
-                VIDEO = True
-            case _:
-                raise ValueError('Unknown CLI input')
+EXTRACT_PROBES = False
 
 # space-time domain size
 L = 1           # [m]
@@ -67,14 +56,39 @@ x_probes = np.linspace(dx_in_out, L-dx_in_out, N_probes)
 
 #%% ------------------ DO NOT TOUCH ANYTHING BELOW THIS LINE ------------------
 
-sol_file_basic = Path('solution_basic.dat')
-sol_file_var_nu = Path('solution_variable_nu.dat')
+out_dir = Path('solution')
+sol_file_basic = out_dir / 'basic.npz'
+sol_file_var_nu = out_dir / 'variable_nu.npz'
 
-probes_file_basic = Path('probes_basic.dat')
-probes_file_var_nu = Path('probes_variable_nu.dat')
+probes_dir = Path('probes')
+probes_file_basic = probes_dir / 'basic.npz'
+probes_file_var_nu = probes_dir / 'variable_nu.npz'
 
-mesh_file_basic = Path('basic.mesh')
-mesh_file_var_nu = Path('variable_nu.mesh')
+
+out_dir.mkdir(exist_ok=True)
+probes_dir.mkdir(exist_ok=True)
+
+
+#%% SET CONTROL FLOW FLAGS
+
+if len(sys.argv) > 1:
+    for j in range(1, len(sys.argv)):
+        match sys.argv[j]:
+            case '--solve':
+                SOLVE = True
+            case '--probes':
+                EXTRACT_PROBES = True
+            case '--video':
+                VIDEO = True
+            case '--help':
+                print('Possible flags: \n'
+                      '\t --solve: solve Burgers eq., with constant and variable viscosity \n'
+                      '\t --probes: sample solution at probe locations \n'
+                      '\t --video: show "video" of time-dependent solution \n'
+                      '\t --help: print this help')
+                quit()
+            case _:
+                raise ValueError('Unknown CLI input')
 
 
 #%% MESH
@@ -86,15 +100,6 @@ x_mesh = np.linspace(x0, xL, N_x)
 t_mesh = np.linspace(0, T, N_t)
 sol_basic = np.zeros(shape=(N_t, N_x))
 sol_var_nu = np.zeros(shape=(N_t, N_x))
-
-print(f'Writing mesh to \n\t{mesh_file_basic.resolve()}')
-np.savetxt(mesh_file_basic, x_mesh, delimiter=', ',
-           header=('Mesh for Burgers equation with constant viscosity\n'
-                   'x [m]'))
-print(f'Writing mesh to \n\t{mesh_file_var_nu.resolve()}')
-np.savetxt(mesh_file_var_nu, x_mesh, delimiter=', ',
-           header=('Mesh for Burgers equation with variable viscosity\n'
-                   'x [m]'))
 
 
 #%% SOLVE THE EQUATION
@@ -114,25 +119,17 @@ if SOLVE:
     end_time = timer()
     time_basic = end_time - start_time
     print(f'Elapsed time: {time_basic} s ({timedelta(seconds=time_basic)} hours)')
+    
     print(f'Saving solution to \n\t{sol_file_basic.resolve()}')
     # obtain a string representation of the lambda function used for u(x,0):
     #   'u_IC = lambda x: np.sin(np.pi*x/L)'
     header_IC = inspect.getsourcelines(u_IC)[0][0].strip()
-    np.savetxt(sol_file_basic, 
-               np.column_stack((t_mesh, max_res_basic, sol_basic)), delimiter=', ',
-               header=('Solution of Burgers equation with constant viscosity\n'
-                       f'x in [0,1], t in [0, {T}], nu0 = {nu0} m2/s\n'
-                       f'{header_IC}\n'
-                       'Each row contains the full solution for the i-th time instant\n'
-                       't [s], max_res [m/s2], u_j [m/s]'))
-    sol_file_basic_npz = Path(f'{sol_file_basic.stem}.npz')
-    print(f'Saving solution to \n\t{sol_file_basic_npz.resolve()}')
     header = ('Solution of Burgers equation with constant viscosity\n'
               f'x in [0,1], t in [0, {T}], nu0 = {nu0} m2/s\n'
               f'{header_IC}\n'
               'x [m], t [s], max_res [m/s2], u [m/s]')
-    np.savez_compressed(sol_file_basic_npz, x_mesh=x_mesh, t_mesh=t_mesh, 
-                        L=L, T=T, nu=cloudpickle.dumps(nu0_fun), uL=uL, u0=u0, 
+    np.savez_compressed(sol_file_basic, x=x_mesh, t=t_mesh, L=L, T=T, 
+                        nu=cloudpickle.dumps(nu0_fun), uL=uL, u0=u0, 
                         u_IC=cloudpickle.dumps(u_IC), max_res=max_res_basic, 
                         solution=sol_basic, description=header)
     
@@ -142,64 +139,54 @@ if SOLVE:
     end_time = timer()
     time_var_nu = end_time - start_time
     print(f'Elapsed time: {time_var_nu} s ({timedelta(seconds=time_var_nu)} hours)')
-    print(f'Saving solution to \n\t{sol_file_var_nu.resolve()}')
-    header_nu = inspect.getsourcelines(nu)[0][0].strip()
-    np.savetxt(sol_file_var_nu, 
-               np.column_stack((t_mesh, max_res_var_nu, sol_var_nu)), delimiter=', ',
-               header=('Solution of Burgers equation with variable viscosity\n'
-                       f'x in [0,1], t in [0, {T}], nu = nu(x,t) m2/s\n, nu0 = {nu0} m2/s\n'
-                       f'{header_IC}\n'
-                       f'{header_nu}\n'
-                       'Each row contains the full solution for the i-th time instant\n'
-                       't [s], max_res [m/s], u_j [m/s]'))
-    sol_file_var_nu = Path(f'{sol_file_var_nu.stem}.npz')
+    
     print(f'Saving solution to \n\t{sol_file_var_nu.resolve()}')
     header = ('Solution of Burgers equation with variable viscosity\n'
               f'x in [0,1], t in [0, {T}], nu = nu(x,t) m2/s, nu0 = {nu0} m2/s\n'
               f'{header_IC}\n'
               'x [m], t [s], max_res [m/s2], u [m/s]')
-    np.savez_compressed(sol_file_var_nu, x_mesh=x_mesh, t_mesh=t_mesh, 
-                        L=L, T=T, nu=cloudpickle.dumps(nu), uL=uL, u0=u0, 
+    np.savez_compressed(sol_file_var_nu, x=x_mesh, t=t_mesh, L=L, T=T, 
+                        nu=cloudpickle.dumps(nu), uL=uL, u0=u0, 
                         u_IC=cloudpickle.dumps(u_IC), max_res=max_res_var_nu, 
                         solution=sol_var_nu, description=header)
 else:
-    data = np.loadtxt(sol_file_basic, delimiter=',')
-    t_mesh = data[:,0]
-    max_res_basic = data[:,1]
-    sol_basic = data[:,2:]
-    data = np.loadtxt(sol_file_var_nu, delimiter=',')
-    max_res_var_nu = data[:,1]
-    sol_var_nu = data[:,2:]
+    data_basic = np.load(sol_file_basic)
+    t_mesh = data_basic['t']
+    max_res_basic = data_basic['max_res']
+    sol_basic = data_basic['solution']
+    data_var_nu = np.load(sol_file_var_nu)
+    # HACK: assuming same time mesh
+    max_res_var_nu = data_var_nu['max_res']
+    sol_var_nu = data_var_nu['solution']
 
 
 #%% EXTRACT "PROBES DATA"
 
-# +1 for time
-sol_probes_basic = np.zeros(shape=(N_t, N_probes+1))
-sol_probes_var_nu = np.zeros(shape=(N_t, N_probes+1))
-for j in range(N_t):
-    sol_probes_basic[j,0] = t_mesh[j]
-    sol_probes_basic[j,1:] = np.interp(x_probes, x_mesh, sol_basic[j,:])
-    sol_probes_var_nu[j,0] = t_mesh[j]
-    sol_probes_var_nu[j,1:] = np.interp(x_probes, x_mesh, sol_var_nu[j,:])
-
-header = ', '.join([f'u_{i} [m/s]' for i in range(1, N_probes+1)])
-header_probes = ', '.join([f'{x_probes[i]}' for i in range(0, N_probes)])
-print(f'Saving sampled basic solution to \n\t{probes_file_basic.resolve()}')
-np.savetxt(probes_file_basic, sol_probes_basic, delimiter=', ',
-           header=('Solution of Burgers equation with constant viscosity sampled along the axis\n'
-                   f'x in [0,1], t in [0, {T}], nu0 = {nu0} m2/s\n'
-                   f'Each row contains {N_probes} probe values\n'
-                   f'Probe locations [m]: {header_probes}\n'
-                   f't [s], residual [m/s], {header}'))
-
-print(f'Saving sampled variable viscosity solution to \n\t{probes_file_var_nu.resolve()}')
-np.savetxt(probes_file_var_nu, sol_probes_var_nu, delimiter=', ',
-           header=('Solution of Burgers equation with variable viscosity sampled along the axis\n'
-                   f'x in [0,1], t in [0, {T}], nu = nu(x,t) m2/s\n'
-                   f'Each row contains {N_probes} probe values\n'
-                   f'Probe locations [m]: {header_probes}\n'
-                   f't [s], residual [m/s], {header}'))
+if EXTRACT_PROBES:
+    sol_probes_basic = np.zeros(shape=(N_t, N_probes))
+    sol_probes_var_nu = np.zeros(shape=(N_t, N_probes))
+    for j in range(N_t):
+        sol_probes_basic[j,:] = np.interp(x_probes, x_mesh, sol_basic[j,:])
+        sol_probes_var_nu[j,:] = np.interp(x_probes, x_mesh, sol_var_nu[j,:])
+    
+    print(f'Saving sampled basic solution to \n\t{probes_file_basic.resolve()}')
+    header_probes = ', '.join([f'{x_probes[i]}' for i in range(0, N_probes)])
+    header = ('Solution of Burgers equation with constant viscosity sampled along the axis\n'
+              f'x in [0,1], t in [0, {T}], nu0 = {nu0} m2/s\n'
+              f'Each row contains {N_probes} probe values\n'
+              f'Probe locations [m]: {header_probes}\n'
+              f'x [m], t [s], u [m/s]')
+    np.savez_compressed(probes_file_basic, t=t_mesh, x=x_probes, 
+                        solution=sol_probes_basic, description=header)
+    
+    print(f'Saving sampled variable viscosity solution to \n\t{probes_file_var_nu.resolve()}')
+    header=('Solution of Burgers equation with variable viscosity sampled along the axis\n'
+            f'x in [0,1], t in [0, {T}], nu = nu(x,t) m2/s\n'
+            f'Each row contains {N_probes} probe values\n'
+            f'Probe locations [m]: {header_probes}\n'
+            f'x [m], t [s], u [m/s]')
+    np.savez_compressed(probes_file_var_nu, t=t_mesh, x=x_probes, 
+                        solution=sol_probes_var_nu, description=header)
 
 
 #%% PLOT SOLUTION
@@ -223,13 +210,13 @@ plt.title(rf'$\nu(x, t={T})$')
 plt.show(block=False)
 
 plt.figure()
-plt.plot(x_mesh, sol_basic[round(sol_basic.shape[0]/2),:], label=r'$\nu = \nu_0$')
-plt.plot(x_mesh, sol_var_nu[round(sol_var_nu.shape[0]/2),:], label=r'$\nu = \nu(x,t)$')
+plt.plot(x_mesh, sol_basic[-1,:], label=r'$\nu = \nu_0$')
+plt.plot(x_mesh, sol_var_nu[-1,:], label=r'$\nu = \nu(x,t)$')
 plt.xlabel('x [m]')
 plt.ylabel(r'$\nu$ [m$^2$/s]')
 plt.autoscale(enable=True, axis='x', tight=True)
 plt.legend()
-plt.title(rf'$\nu(x, t={T/2})$')
+plt.title(rf'$\nu(x, t={T})$')
 plt.show(block=False)
 
 plt.figure()
