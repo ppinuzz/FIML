@@ -8,7 +8,7 @@ import fiml.auxiliaries as aux
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
-def run_parallel(N_workers, theta, run_solver_case, *solver_args):
+def run_parallel(N_workers, theta, run_solver_case, sol, residuals, *solver_args):
     with ProcessPoolExecutor(max_workers=N_workers) as executor:
         job_handles = {}
         for r, theta_r in enumerate(theta):
@@ -34,15 +34,16 @@ def run_parallel(N_workers, theta, run_solver_case, *solver_args):
             # the raised exception is stored in the Future job object and gets
             # re-raised when .result() is called
             try:
-                # (sample_id should be equal to sample_num)
-                # output will be a list of all the values returned by the solver
-                sample_id, *output = job.result()
+                # residuals' 2nd dimension 1 is not really needed, but that way 
+                # they have the same calling scheme (time, space, sample) as
+                # the solution object
+                _, sol[:,:,sample_num], residuals[:,0,sample_num] = job.result()
             except Exception as exc:
                 # sample_id is not available here because .result() crashed
                 # => use sample_num, which should be equal
                 aux.warning(f'Job {sample_num} failed with error message: {exc.args[0]}')
             else:
-                print(f'Job {sample_id} completed successfully')
+                print(f'Job {sample_num} completed successfully')
     
-    return job_handles
+    return sol, residuals
 
