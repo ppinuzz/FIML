@@ -23,7 +23,7 @@ import burgers
 #%% USER INPUT
 
 VIDEO = False
-SOLVE = False
+SOLVE = True
 EXTRACT_PROBES = False
 
 # space-time domain size
@@ -44,9 +44,9 @@ u0 = 0
 uL = 0
 
 # actual viscosity 
-nu = lambda x, t: nu0 * (1 + 200*np.sin(np.pi*x/L)*(1-np.exp(-t)))
+nu = lambda x, t, u, ux, uxx: nu0 * (1 + 200*np.sin(np.pi*x/L)*(1-np.exp(-t)))
 # dummy function for constant viscosity
-nu0_fun = lambda x, t: nu0
+nu0_fun = lambda x, t, u, ux, uxx: nu0
 
 # probes settings
 N_probes = 10
@@ -115,7 +115,7 @@ if SOLVE:
     
     # BASIC BURGERS' EQUATION
     start_time = timer()
-    sol_basic, max_res_basic = burgers.solve_Burgers(sol_basic, x_mesh, t_mesh, nu=nu0_fun, eq_type='basic')
+    sol_basic, max_res_basic = burgers.solve_Burgers(sol_basic, x_mesh, t_mesh, nu=nu0_fun)
     end_time = timer()
     time_basic = end_time - start_time
     print(f'Elapsed time: {time_basic} s ({timedelta(seconds=time_basic)} hours)')
@@ -135,7 +135,7 @@ if SOLVE:
     
     # VARIABLE VISCOSITY BURGERS' EQUATION
     start_time = timer()
-    sol_var_nu, max_res_var_nu = burgers.solve_Burgers(sol_var_nu, x_mesh, t_mesh, nu=nu, eq_type='variable_nu')
+    sol_var_nu, max_res_var_nu = burgers.solve_Burgers(sol_var_nu, x_mesh, t_mesh, nu=nu)
     end_time = timer()
     time_var_nu = end_time - start_time
     print(f'Elapsed time: {time_var_nu} s ({timedelta(seconds=time_var_nu)} hours)')
