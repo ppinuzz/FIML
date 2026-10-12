@@ -146,73 +146,89 @@ def newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu):
     return u_new, error
 
 
-def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, WRITE_LOG=True):
+@partial(jax.jit, static_argnames=('nu', 'k_max'))
+def _solve_all_steps(sol, x_mesh, t_mesh, nu, tol, k_max):
+    """Compiled Newton and time loops. Viscosity must not depend on u_xx."""
+    dt = t_mesh[1] - t_mesh[0]
 
-    # CHECK
-    # u_xx requires 4 spatial nodes: 
-    #   *) u_j-1, u_j, u_j+1 for interior nodes
-    #   *) u0, u1, u2, u3 for left boundary node (and -1,-2,-3,-4 for right)
+    def advance_one_time_step(u_old, inputs):
+        time, left_bc, right_bc = inputs
+        # Set the boundary values at the NEW time instant.
+        u = u_old.at[0].set(left_bc)
+        u = u.at[-1].set(right_bc)
+
+        def continue_newton(state):
+            _, err, iteration = state
+            return (err >= tol) & (iteration < k_max) & jnp.isfinite(err)
+
+        def update_newton(state):
+            u, _, iteration = state
+            u, err = newton_step_tridiagonal(
+                u, u_old, x_mesh, time, dt, nu
+            )
+            return u, err, iteration + 1
+
+        u, err, iteration = jax.lax.while_loop(
+            continue_newton,
+            update_newton,
+            (u, jnp.asarray(tol + 1.0, dtype=u.dtype), jnp.int32(0))
+        )
+        return u, (u, err, iteration)
+
+    _, (history, errors, iterations) = jax.lax.scan(
+        advance_one_time_step,
+        sol[0, :],
+        (t_mesh[1:], sol[1:, 0], sol[1:, -1])
+    )
+
+    solution = jnp.concatenate((sol[:1, :], history), axis=0)
+    max_res = jnp.concatenate(
+        (jnp.zeros((1,), dtype=sol.dtype), errors), axis=0
+    )
+    return solution, max_res, iterations
+
+
+def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5,
+                  k_max=5000, WRITE_LOG=True):
+    """Solve Burgers' equation with Dirichlet BCs on uniform grids.
+
+    IMPORTANT: nu may depend on (x, t, u, ux), but NOT on uxx;
+    the Newton matrix is otherwise generally pentadiagonal.
+    """
     if x_mesh.size < 4:
         raise ValueError('At least 4 spatial nodes are required')
     if t_mesh.size < 2:
         raise ValueError('At least 2 time instants are required')
-    
 
-    # make sure inputs are JAX arrays
     sol = jnp.asarray(sol, dtype=jnp.float64)
     x_mesh = jnp.asarray(x_mesh, dtype=jnp.float64)
     t_mesh = jnp.asarray(t_mesh, dtype=jnp.float64)
-    
-    # HACK: assumes uniform time mesh
-    dt = t_mesh[1] - t_mesh[0]
-    N_t = t_mesh.shape[0]
-    max_res = jnp.zeros(shape=t_mesh.shape)
-    
+
+    if sol.shape != (t_mesh.size, x_mesh.size):
+        raise ValueError('sol must have shape (len(t_mesh), len(x_mesh))')
+
+    sol, max_res, iterations = _solve_all_steps(
+        sol, x_mesh, t_mesh, nu, tol, k_max
+    )
+
     if WRITE_LOG:
+        # One transfer/synchronization and one table rendering, after solving.
+        import numpy as np
+        time_host = np.asarray(t_mesh[1:])
+        error_host = np.asarray(max_res[1:])
+        iterations_host = np.asarray(iterations)
+
         solver_table = PrettyTable()
         solver_table.title = "Burgers' equation"
-        solver_table.field_names = ['t [s]', 'Max residual u [m/s2]', 'Iterations']
-    
-    # time t = t0 is already known from the BC => no need to solve it
-    # (and residuals are 0 at that time)
-    for j in range(1, N_t):
-        t = t_mesh[j]
-        u_old = sol[j-1,:].copy()
-        # initial guess: previous time step
-        u = u_old.copy()
-        # assign the correct BCs, if they're time varying
-        u = u.at[0].set(sol[j,0])
-        u = u.at[-1].set(sol[j,-1])
-        err = tol + 1
-        k = 0
-        while err >= tol and k < k_max:
-            u, err = newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu)
-            err = jnp.max(jnp.abs(residual(u, u_old, x_mesh, t, dt, nu)[1:-1]))
-            k += 1
-        max_res = max_res.at[j].set(err)
-        sol = sol.at[j,:].set(u)
-        
-        if WRITE_LOG:
-            solver_table.add_row([f'{t:.6f}', f'{err:.5e}', f'{k}'])
-            # the 1st time, print the header too
-            if j == 1:
-                # remove last line from the header, to avoid double line of ------- only
-                header = solver_table.get_string(header=True)
-                # split the single string into its different lines (separated by '\n')
-                # and glue all-but-the-last together
-                header = '\n'.join(header.split('\n')[0:-1])
-                print(header)
-            else:
-                # select the newly-added row (index j-1, since the 1st row
-                # corrspoending to j = 1 has index 0) and print only the
-                # numerical values (row -2 becaue the last row is the ruler)
-                row = solver_table.get_string(start=j-1, border=True)
-                print(row.split('\n')[-2])
-            
-            if err >= tol:
-                print(f'Solver did not converge for t = {t} s, max residual: {err:.5e} m/s2')
-    if WRITE_LOG:
-        # once the loop has finished, print the bottom ruler
-        #print(row.split('\n')[-1])     # crashes if only 1 time instant is solved
-        print(solver_table.get_string().split('\n')[-1])
+        solver_table.field_names = [
+            't [s]', 'Max residual u [m/s2]', 'Iterations'
+        ]
+        for t, err, k in zip(time_host, error_host, iterations_host):
+            solver_table.add_row([f'{t:.6f}', f'{err:.5e}', str(k)])
+        print(solver_table)
+
+        failed = (~np.isfinite(error_host)) | (error_host >= tol)
+        if np.any(failed):
+            print(f'Warning: {np.count_nonzero(failed)} time steps did not converge')
+
     return sol, max_res

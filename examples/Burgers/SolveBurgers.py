@@ -42,8 +42,6 @@ xL = L
 dt = 3.125e-4
 dx = 7.813e-5
 
-T = 3*dt
-
 # initial and boundary conditions
 u_IC = lambda x: jnp.sin(jnp.pi*x/L)
 u0 = 0
@@ -176,8 +174,8 @@ if EXTRACT_PROBES:
     sol_probes_basic = jnp.zeros(shape=(N_t, N_probes))
     sol_probes_var_nu = jnp.zeros(shape=(N_t, N_probes))
     for j in range(N_t):
-        sol_probes_basic.at[j,:].set(jnp.interp(x_probes, x_mesh, sol_basic[j,:]))
-        sol_probes_var_nu.at[j,:].set(jnp.interp(x_probes, x_mesh, sol_var_nu[j,:]))
+        sol_probes_basic = sol_probes_basic.at[j,:].set(jnp.interp(x_probes, x_mesh, sol_basic[j,:]))
+        sol_probes_var_nu = sol_probes_var_nu.at[j,:].set(jnp.interp(x_probes, x_mesh, sol_var_nu[j,:]))
     
     print(f'Saving sampled basic solution to \n\t{probes_file_basic.resolve()}')
     header_probes = ', '.join([f'{x_probes[i]}' for i in range(0, N_probes)])
@@ -228,7 +226,7 @@ plt.figure()
 plt.semilogy(t_mesh, max_res_basic, label=r'$\nu = \nu_0$')
 plt.semilogy(t_mesh, max_res_var_nu, label=r'$\nu = \nu(x,t,u,u_x)$')
 plt.xlabel('t [s]')
-plt.ylabel(r'$\max|\mathcal{B}(u^k)|$ [m/s]')
+plt.ylabel(r'$\max|\mathcal{B}(u^k)|$ [m/s$^2$]')
 plt.autoscale(enable=True, axis='x', tight=True)
 plt.title('Maximum residual')
 plt.legend()
