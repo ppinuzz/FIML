@@ -8,6 +8,7 @@ References:
 @author: Andrea Pinardi <andrea.pinardi@polimi.it>
 """
 
+import numpy as np
 from prettytable import PrettyTable
 
 import jax
@@ -98,8 +99,15 @@ def residual(u, u_old, x, t, dt, nu):
     return res
 
 
-
-@partial(jax.jit, static_argnames=('nu',))
+# JIT-compile the function, including in the compiled object the function nu()
+# (if nu is changed, then this function will be recompiled)
+# EQUIVALENT FORM:
+#   newton_step_tridiagonal = jax.jit(newton_step_tridiagonal, 
+#                                       static_argnames=('nu', )
+#                                   )
+# => the decorator @partial acts as a "lambda function" without altering the
+# syntax of the function definition
+@partial(jax.jit, static_argnames=('nu', ))
 def newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu):
     # eq. to solve:
     #   du/dt + u du/dx = d(nu*du/dx)/dx
@@ -115,91 +123,120 @@ def newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu):
     # point to have BC values)
     F = lambda U: residual(u.at[1:-1].set(U), u_old, x_mesh, t, dt, nu)[1:-1]
 
-    # evaluate residual and linearize it
+    # non-linear function F(U) can be expanded as F(U+dU) = F(U) + J(U)*dU + ...
+    # => use the linearize() function to calculate
+    #   F(U)        => the residual
+    #   JdU_fun     => a function f(x) representing J(U)*x ("product-by-J" function)
     u_int = u[1:-1]
-    res, matvec = jax.linearize(F, u_int)
+    res_int, JdU_fun = jax.linearize(F, u_int)
 
-    # recover the three Jacobian diagonals using three Jacobian-vector products
+    # reconstruct the jacobian matrix using JACOBIAN COLOURING
+    # *) jax.jacfwd(F)(u_int) creates the full NxN jacobian => too slow
+    # *) since J is tridiagonal if nu(x, t, u, u_x) using this discretisation, 
+    # extract all the non-zero elements in J(U) by multiplying J(U) with 
+    # ones-and-zeros vectors chosen on purpose
     N = u_int.size
     i = jnp.arange(N)
-    seeds = (
-        i[None, :] % 3 == jnp.arange(3)[:, None]
-    ).astype(u.dtype)
-
-    y = jax.vmap(matvec)(seeds)
-
-    # extract diagonals and residuals vector, ignoring BC points
-    lower_diag = y[(i - 1) % 3, i].at[0].set(0.0)
-    main_diag = y[i % 3, i]
-    upper_diag = y[(i + 1) % 3, i].at[-1].set(0.0)
+    # 3xN matrix, where each row is a vector composed with
+    #   row 1) 1st, 4th, 7th, ecc. element non-zero
+    #   row 2) 2nd, 5th, 8th, ecc. element non-zero (row 1, but shifted)
+    #   row 3) 3rd, 6th, 9th, ecc. element non-zero (row 2 shifted)
+    #seeds = (i[None, :] % 3 == jnp.arange(3)[:, None]).astype(u.dtype)
+    seeds = jnp.zeros((3, N))
+    seeds = seeds.at[0, 0::3].set(1)
+    seeds = seeds.at[1, 1::3].set(1)
+    seeds = seeds.at[2, 2::3].set(1)
+    # apply f(x) function to each column of the seeds matrix
+    J_elems = jax.vmap(JdU_fun)(seeds)
+    # extract jacobina diagonals and residuals vector
+    lower_diag_jac = J_elems[(i - 1)%3, i].at[0].set(0.0)
+    main_diag_jac = J_elems[i % 3, i]
+    upper_diag_jac = J_elems[(i + 1)%3, i].at[-1].set(0.0)
     # Newton's method: J(x^n)(x_n+1 - x_n) = -F(x_n)
+    # (NB: res_int is (N,), but matrix product requires (N,1))
     delta = jax.lax.linalg.tridiagonal_solve(
-        lower_diag, main_diag, upper_diag, -res[:, None]
-    )[:, 0]
+                lower_diag_jac, main_diag_jac, upper_diag_jac, -res_int[:,jnp.newaxis])
+    # delta is returned with the same shape as -F(x_n), i.e. (N,1) => remove 1
+    delta = jnp.squeeze(delta)
     # [1:-1] since 1st and last nodes are not solved for
     u_new = u.at[1:-1].add(delta)
-
-    error = jnp.max(
-                jnp.abs(residual(u_new, u_old, x_mesh, t, dt, nu)[1:-1])
-                )
+    error = jnp.max(jnp.abs(residual(u_new, u_old, x_mesh, t, dt, nu)))
 
     return u_new, error
 
-
-@partial(jax.jit, static_argnames=('nu', 'k_max'))
+# NB: since tol and k_max are NOT static, they can be changed without having 
+# to recompile the function
+@partial(jax.jit, static_argnames=('nu', ))
 def _solve_all_steps(sol, x_mesh, t_mesh, nu, tol, k_max):
-    """Compiled Newton and time loops. Viscosity must not depend on u_xx."""
+    """Compiled Newton and time loops, viscosity must NOT depend on u_xx"""
     dt = t_mesh[1] - t_mesh[0]
 
-    def advance_one_time_step(u_old, inputs):
-        time, left_bc, right_bc = inputs
-        # Set the boundary values at the NEW time instant.
-        u = u_old.at[0].set(left_bc)
-        u = u.at[-1].set(right_bc)
+    def advance_time_step(u_old, inputs):
+        time, u0, uL = inputs
+        # enforce BCs
+        u = u_old.at[0].set(u0)
+        u = u.at[-1].set(uL)
 
+        # NB: tol, k_max, ecc. are accessible to the inner functions
         def continue_newton(state):
             _, err, iteration = state
-            return (err >= tol) & (iteration < k_max) & jnp.isfinite(err)
+            keep_going = (err >= tol) & (iteration < k_max) & jnp.isfinite(err)
+            return keep_going
 
         def update_newton(state):
             u, _, iteration = state
-            u, err = newton_step_tridiagonal(
-                u, u_old, x_mesh, time, dt, nu
-            )
+            u, err = newton_step_tridiagonal(u, u_old, x_mesh, time, dt, nu)
             return u, err, iteration + 1
 
-        u, err, iteration = jax.lax.while_loop(
-            continue_newton,
-            update_newton,
-            (u, jnp.asarray(tol + 1.0, dtype=u.dtype), jnp.int32(0))
-        )
-        return u, (u, err, iteration)
+        # as long as continue_newton() returns True, execute update_newton()
+        # both functions MUST takes in input the same variables
+        # (here, u, error and iteration number)
+        # equivalent to:
+        #   state = (u, tol + 1, 0)
+        #   while continue_newton(state):
+        #       state = update_newton(state)
+        # FIXME: potrebbe essere necessario specificare 
+        # jnp.asarray(tol + 1.0, dtype=u.dtype) e jnp.int32(0)
+        # per assicurare stessa array shape e dtype
+        u, err, iteration = jax.lax.while_loop(continue_newton,
+                                               update_newton,
+                                               (u, tol+1, 0)
+                                               )
+        # return:
+        #   - the CARRY, i.e. the new state (current new solution)
+        #       => passed to the next invocation of advance_time_step()
+        #   - the RECORDED OUTPUTS to be stored in the solution history
+        #       => accumulated into arrays by scan(), useful for logging
+        recorded_out = (u, err, iteration)
+        return u, recorded_out
 
-    _, (history, errors, iterations) = jax.lax.scan(
-        advance_one_time_step,
-        sol[0, :],
-        (t_mesh[1:], sol[1:, 0], sol[1:, -1])
+    # equivalent to
+    #   U = sol[0,:]
+    #   history_output = []
+    #   for t_i, u0, uL in zip(t_mesh[1:], sol[1:, 0], sol[1:, -1]):
+    #       U, output_iter = advance_time_step(U, (t_i, u0, uL))
+    #       history_output.append(output_iter)
+    #   return U, np.vstack(history_output)
+    _, (u_sol, errors, iters) = jax.lax.scan(advance_time_step,
+                                             # initial carry value: u(x,0)
+                                             sol[0, :],
+                                             # thing to loop over
+                                             (t_mesh[1:], sol[1:, 0], sol[1:, -1])
     )
 
-    solution = jnp.concatenate((sol[:1, :], history), axis=0)
-    max_res = jnp.concatenate(
-        (jnp.zeros((1,), dtype=sol.dtype), errors), axis=0
-    )
-    return solution, max_res, iterations
+    solution = jnp.vstack((sol[0, :], u_sol))
+    # 1st residual is 0, since u(x,0) is the known IC
+    max_res = jnp.concatenate((jnp.zeros((1,)), errors))
+    return solution, max_res, iters
 
 
-def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5,
-                  k_max=5000, WRITE_LOG=True):
-    """Solve Burgers' equation with Dirichlet BCs on uniform grids.
-
-    IMPORTANT: nu may depend on (x, t, u, ux), but NOT on uxx;
-    the Newton matrix is otherwise generally pentadiagonal.
-    """
+def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, WRITE_LOG=True):
     if x_mesh.size < 4:
         raise ValueError('At least 4 spatial nodes are required')
     if t_mesh.size < 2:
         raise ValueError('At least 2 time instants are required')
 
+    # ensure inputs are JAX arrays
     sol = jnp.asarray(sol, dtype=jnp.float64)
     x_mesh = jnp.asarray(x_mesh, dtype=jnp.float64)
     t_mesh = jnp.asarray(t_mesh, dtype=jnp.float64)
@@ -212,23 +249,15 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5,
     )
 
     if WRITE_LOG:
-        # One transfer/synchronization and one table rendering, after solving.
-        import numpy as np
-        time_host = np.asarray(t_mesh[1:])
-        error_host = np.asarray(max_res[1:])
-        iterations_host = np.asarray(iterations)
-
         solver_table = PrettyTable()
         solver_table.title = "Burgers' equation"
-        solver_table.field_names = [
-            't [s]', 'Max residual u [m/s2]', 'Iterations'
-        ]
-        for t, err, k in zip(time_host, error_host, iterations_host):
+        solver_table.field_names = ['t [s]', 'Max residual u [m/s2]', 'Iterations']
+        for t, err, k in zip(t_mesh[1:], max_res[1:], iterations):
             solver_table.add_row([f'{t:.6f}', f'{err:.5e}', str(k)])
         print(solver_table)
 
-        failed = (~np.isfinite(error_host)) | (error_host >= tol)
+        failed = (~np.isfinite(max_res[1:])) | (max_res[1:] >= tol)
         if np.any(failed):
-            print(f'Warning: {np.count_nonzero(failed)} time steps did not converge')
+            print(f'WARNING: {np.count_nonzero(failed)} time steps did not converge')
 
     return sol, max_res

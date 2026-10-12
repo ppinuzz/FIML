@@ -231,8 +231,8 @@ plt.autoscale(enable=True, axis='x', tight=True)
 plt.title('Maximum residual')
 plt.legend()
 # non blocking, so that it won't wait for the user to close the window
-#plt.show(block=False)
-plt.show()
+plt.show(block=False)
+#plt.show()
 
 if VIDEO:
     fig, ax = plt.subplots()
