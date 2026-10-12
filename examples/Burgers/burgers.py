@@ -8,14 +8,13 @@ References:
 @author: Andrea Pinardi <andrea.pinardi@polimi.it>
 """
 
-import numpy as np
 from prettytable import PrettyTable
-from scipy.linalg import solve_banded
 
 import jax
 # use float64, rather than float32
 jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
+from functools import partial
 
 
 def u_x(u, dx):
@@ -97,7 +96,54 @@ def residual(u, u_old, x, t, dt, nu):
     res = jnp.zeros_like(u)
     res = res.at[1:-1].set(dudt[1:-1] + u[1:-1]*dudx[1:-1] - d2udx2_nu)
     return res
+
+
+
+@partial(jax.jit, static_argnames=('nu',))
+def newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu):
+    # eq. to solve:
+    #   du/dt + u du/dx = d(nu*du/dx)/dx
+    # same as
+    #   F(x, t, u, ux) = 0
+    # with 
+    #   F(x, t, u, ux) = du/dt + u du/dx - d(nu*du/dx)/dx
+    # i.e. F is the residual function
     
+    # F holds at all nodes, from x0 to xL, but only the interior nodes must be
+    # solved => wrap it to ignore those nodes
+    # (since BCs must always be enforced, copy the input and force 1st and last
+    # point to have BC values)
+    F = lambda U: residual(u.at[1:-1].set(U), u_old, x_mesh, t, dt, nu)[1:-1]
+
+    # evaluate residual and linearize it
+    u_int = u[1:-1]
+    res, matvec = jax.linearize(F, u_int)
+
+    # recover the three Jacobian diagonals using three Jacobian-vector products
+    N = u_int.size
+    i = jnp.arange(N)
+    seeds = (
+        i[None, :] % 3 == jnp.arange(3)[:, None]
+    ).astype(u.dtype)
+
+    y = jax.vmap(matvec)(seeds)
+
+    # extract diagonals and residuals vector, ignoring BC points
+    lower_diag = y[(i - 1) % 3, i].at[0].set(0.0)
+    main_diag = y[i % 3, i]
+    upper_diag = y[(i + 1) % 3, i].at[-1].set(0.0)
+    # Newton's method: J(x^n)(x_n+1 - x_n) = -F(x_n)
+    delta = jax.lax.linalg.tridiagonal_solve(
+        lower_diag, main_diag, upper_diag, -res[:, None]
+    )[:, 0]
+    # [1:-1] since 1st and last nodes are not solved for
+    u_new = u.at[1:-1].add(delta)
+
+    error = jnp.max(
+                jnp.abs(residual(u_new, u_old, x_mesh, t, dt, nu)[1:-1])
+                )
+
+    return u_new, error
 
 
 def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, WRITE_LOG=True):
@@ -140,19 +186,7 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, WRITE_LOG=True)
         err = tol + 1
         k = 0
         while err >= tol and k < k_max:
-            # 1st and last point are given by BCs => only solver internal points
-            u_internal = u[1:-1].copy()
-            # 1st and last residuals are 0 by def. (imposed BCs)
-            res_internal = residual(u, u_old, x_mesh, t, dt, nu)[1:-1]
-            # calculate J_ij = dR_i/du_j
-            J = jax.jacfwd(residual)(
-                            u, u_old, x_mesh, t, dt, nu)[1:-1, 1:-1]
-            delta = jnp.linalg.solve(J, -res_internal)
-            # update the initial guess:
-            #   - u(0) and u(L) are unchanged, as they're given by the BCs and
-            #   are enforced at all time instants
-            #   - internal points must be updated
-            u = u.at[1:-1].add(delta)
+            u, err = newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu)
             err = jnp.max(jnp.abs(residual(u, u_old, x_mesh, t, dt, nu)[1:-1]))
             k += 1
         max_res = max_res.at[j].set(err)
