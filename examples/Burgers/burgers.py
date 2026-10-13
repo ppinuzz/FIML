@@ -55,7 +55,7 @@ def u_xx(u, dx):
     return dudxx
 
 
-def nu_faces(u, x, t, nu):
+def nu_faces(u, x, t, nu, beta_t):
     """Viscosity evaluated at face nodes (e.g. i+1/2)"""
     
     dx = x[1] - x[0]
@@ -68,6 +68,9 @@ def nu_faces(u, x, t, nu):
     uxx = u_xx(u, dx)
     uxx_f = (uxx[:-1] + uxx[1:]) / 2
     nu_f = nu(x_f, t, u_f, ux_f, uxx_f)
+    # add correction
+    beta_f = (beta_t[:-1] + beta_t[1:]) / 2
+    nu_f = beta_f * nu_f
     # make sure that the same is the same as that of the derivative term, as
     # they will be multiplied together (e.g. if nu() is a constant-value
     # function, it will return a scalar)
@@ -75,7 +78,7 @@ def nu_faces(u, x, t, nu):
     return nu_f
 
 
-def residual(u, u_old, x, t, dt, nu):
+def residual(u, u_old, x, t, dt, nu, beta_t):
     """
     Evaluate Burgers' equation to calculate the residual
         R(u) = du/dt + u du/dx - d(nu * du/dx)/dx
@@ -85,7 +88,7 @@ def residual(u, u_old, x, t, dt, nu):
     dudt = (u - u_old) / dt
     # 2nd order centred in space @ grid nodes
     dudx = u_x(u, dx)
-    nu_f = nu_faces(u, x, t, nu)
+    nu_f = nu_faces(u, x, t, nu, beta_t)
     nu_plus = nu_f[1:]
     nu_minus = nu_f[:-1]
     # nu_i+1/2 * (du/dx)_i+1/2
@@ -108,7 +111,7 @@ def residual(u, u_old, x, t, dt, nu):
 # => the decorator @partial acts as a "lambda function" without altering the
 # syntax of the function definition
 @partial(jax.jit, static_argnames=('nu', ))
-def newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu):
+def newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu, beta_t):
     # eq. to solve:
     #   du/dt + u du/dx = d(nu*du/dx)/dx
     # same as
@@ -121,7 +124,7 @@ def newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu):
     # solved => wrap it to ignore those nodes
     # (since BCs must always be enforced, copy the input and force 1st and last
     # point to have BC values)
-    F = lambda U: residual(u.at[1:-1].set(U), u_old, x_mesh, t, dt, nu)[1:-1]
+    F = lambda U: residual(u.at[1:-1].set(U), u_old, x_mesh, t, dt, nu, beta_t)[1:-1]
 
     # non-linear function F(U) can be expanded as F(U+dU) = F(U) + J(U)*dU + ...
     # => use the linearize() function to calculate
@@ -160,19 +163,19 @@ def newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu):
     delta = jnp.squeeze(delta)
     # [1:-1] since 1st and last nodes are not solved for
     u_new = u.at[1:-1].add(delta)
-    error = jnp.max(jnp.abs(residual(u_new, u_old, x_mesh, t, dt, nu)))
+    error = jnp.max(jnp.abs(residual(u_new, u_old, x_mesh, t, dt, nu, beta_t)))
 
     return u_new, error
 
 # NB: since tol and k_max are NOT static, they can be changed without having 
 # to recompile the function
 @partial(jax.jit, static_argnames=('nu', ))
-def _solve_all_steps(sol, x_mesh, t_mesh, nu, tol, k_max):
+def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max):
     """Compiled Newton and time loops, viscosity must NOT depend on u_xx"""
     dt = t_mesh[1] - t_mesh[0]
 
     def advance_time_step(u_old, inputs):
-        time, u0, uL = inputs
+        time, u0, uL, beta_t = inputs
         # enforce BCs
         u = u_old.at[0].set(u0)
         u = u.at[-1].set(uL)
@@ -185,7 +188,7 @@ def _solve_all_steps(sol, x_mesh, t_mesh, nu, tol, k_max):
 
         def update_newton(state):
             u, _, iteration = state
-            u, err = newton_step_tridiagonal(u, u_old, x_mesh, time, dt, nu)
+            u, err = newton_step_tridiagonal(u, u_old, x_mesh, time, dt, nu, beta_t)
             return u, err, iteration + 1
 
         # as long as continue_newton() returns True, execute update_newton()
@@ -213,15 +216,15 @@ def _solve_all_steps(sol, x_mesh, t_mesh, nu, tol, k_max):
     # equivalent to
     #   U = sol[0,:]
     #   history_output = []
-    #   for t_i, u0, uL in zip(t_mesh[1:], sol[1:, 0], sol[1:, -1]):
-    #       U, output_iter = advance_time_step(U, (t_i, u0, uL))
+    #   for t_i, u0, uL, beta_t in zip(t_mesh[1:], sol[1:, 0], sol[1:, -1], beta[1:, :]):
+    #       U, output_iter = advance_time_step(U, (t_i, u0, uL, beta_t))
     #       history_output.append(output_iter)
     #   return U, np.vstack(history_output)
     _, (u_sol, errors, iters) = jax.lax.scan(advance_time_step,
                                              # initial carry value: u(x,0)
                                              sol[0, :],
                                              # thing to loop over
-                                             (t_mesh[1:], sol[1:, 0], sol[1:, -1])
+                                             (t_mesh[1:], sol[1:,0], sol[1:,-1], beta[1:,:])
     )
 
     solution = jnp.vstack((sol[0, :], u_sol))
@@ -230,7 +233,7 @@ def _solve_all_steps(sol, x_mesh, t_mesh, nu, tol, k_max):
     return solution, max_res, iters
 
 
-def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, WRITE_LOG=True):
+def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRITE_LOG=True):
     if x_mesh.size < 4:
         raise ValueError('At least 4 spatial nodes are required')
     if t_mesh.size < 2:
@@ -243,10 +246,13 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, WRITE_LOG=True)
 
     if sol.shape != (t_mesh.size, x_mesh.size):
         raise ValueError('sol must have shape (len(t_mesh), len(x_mesh))')
+    
+    if beta is None:
+        beta = jnp.ones_like(sol)
+    else:
+        beta = jnp.asarray(beta)
 
-    sol, max_res, iterations = _solve_all_steps(
-        sol, x_mesh, t_mesh, nu, tol, k_max
-    )
+    sol, max_res, iterations = _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max)
 
     if WRITE_LOG:
         solver_table = PrettyTable()
