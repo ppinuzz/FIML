@@ -1,5 +1,5 @@
 """
-Core FIML utilities
+Core FIML utilities.
 
 @author: Andrea Pinardi <andrea.pinardi@polimi.it>
 """
@@ -7,9 +7,19 @@ Core FIML utilities
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.interpolate import BSpline
+import jax
+# use float64, rather than float32
+jax.config.update('jax_enable_x64', True)
+import jax.numpy as jnp
 
-
-def create_basis_functions(N_basis, p=3, N_t=500, PLOT=False):
+# no need to JIT compile it, as this function is called only once during the
+# optimisation & you'd need to pass p as a static argument, as it's used to
+# determine an array shape, which must be known at compile-time
+#@jax.jit
+def create_basis_functions_matrix(N_basis, xi, p=3, PLOT=False, domain=None):
+    if N_basis < p+1:
+        raise ValueError('The number of basis functions must be at least p+1, '
+                         f' with p being the order of the spline (here: p = {p})')
     # N_basis = N_knots - p - 1
     # for open/clamped splines, the endpoints are both repeated (p+1) times in the
     # vector of knots
@@ -17,40 +27,45 @@ def create_basis_functions(N_basis, p=3, N_t=500, PLOT=False):
     # therefore N_int = N_knots - 2p - 2 = (N_basis + p + 1) - 2p - 2
     N_int_knots = N_basis - p - 1
     # uniformly spaced knots
-    knots = np.linspace(0, 1, N_int_knots+2)
+    knots = jnp.linspace(0, 1, N_int_knots+2)
     # internal knots: points where the cubic polynomials are joined
     int_knots = knots[1:-1]
     # open/clamped splines: repeat endpoints p+1 times => 1st endpoint has 
     # spline coordinate t = 0, whereas last point has coordinate t = 1
-    knots_all = np.concatenate((np.zeros(p+1),
-                                int_knots,
-                                np.ones(p+1)))
-    B = []
-    for n in range(N_basis):
-        coeff = np.zeros(N_basis)
-        coeff[n] = 1
-        spline = BSpline(knots_all, coeff, p)
-        B.append(spline)
+    knots_all = jnp.concatenate((jnp.zeros(p+1), int_knots, jnp.ones(p+1)))
+    
+    # evaluate the basis functions for all the values of the non-dimensional
+    # parameter (x/L for Bx, t/T for Bt)
+    #   [B0(xi_0) ... Bn(xi_0)]
+    #   [ ...   ...   ... ]
+    #   [B0(xi_N) ... Bn(xi_N)]
+    # i.e. Bij = Bj(xi_i)
+    if domain is None:
+        L = xi[-1] - xi[0]
+    else:
+        # if interface nodes are passed, L calculated from the mesh would be
+        # L - dx/2 - dx/2 = L - dx
+        L = domain[1] - domain[0]
+    xi = jnp.asarray(xi) / (xi[-1] - xi[0])
+    B = BSpline.design_matrix(xi, knots_all, p)
+    # convert to an actual (NumPy) matrix, then to a JAX array
+    #   [B0(xi_0) ... B0(xi_N)]
+    #   [ ...   ...   ... ]
+    #   [Bn(xi_0) ... Bn(xi_N)]
+    B_mat = jnp.asarray(B.toarray().T)
     
     if PLOT:
         plt.figure()
-        # normalised coordinate x/L in [0,1]
-        t = np.linspace(0, 1, N_t)
-        B_eval = np.zeros((N_basis, N_t))
         for n in range(N_basis):
-            coeff = np.zeros(N_basis)
-            coeff[n] = 1
-            spline = B[n]
-            B_eval[n, :] = spline(t)
-            plt.plot(t, B_eval[n, :], label=f'$B_{n}$')
+            plt.plot(xi, B_mat[n,:], label=f'$B_{n}$')
         plt.xlabel(r'$\xi$ [-]')
         plt.ylabel(r'$B_i$ [-]')
-        plt.autoscale(enable=True, axis='x', tight=True)
+        plt.xlim(0, 1)
         plt.legend()
         plt.title(f'{N_basis} cubic B-splines')
         plt.show()
     
-    return B
+    return B_mat
 
 
 def cost_function(beta, d, h_beta, Cm, Cbeta, beta_prior):
