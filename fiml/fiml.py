@@ -68,6 +68,21 @@ def create_basis_functions_matrix(N_basis, xi, p=3, PLOT=False, domain=None):
     
     return B_mat
 
+#@jax.jit
+def beta(theta_r, B_x, B_t):
+    N_basis_x = B_x.shape[0]
+    N_basis_t = B_t.shape[0]
+    # theta = vector of vectors 
+    #   [theta_11, theta_12, ..., theta_1Q, theta_21, ..., theta_MQ]
+    #   = [theta_1; theta_2; ..., theta_M]
+    # the m-th component contains Q coefficients for each one of the Q time-functions
+    # in 1 + sum_mq theta_mq Bm(x) Bq(t)
+    # transform it to a matrix [theta_1, theta_2, ..., theta_M] (M x Q)
+    Theta_r = jnp.reshape(theta_r, (N_basis_x, N_basis_t))
+    # correction for the entire space-time mesh (N_x x N_t)
+    beta_r = 1 + B_x.T @ Theta_r @ B_t
+    return beta_r
+
 
 #@partial(jax.jit, static_argnames=('h_beta', ))
 def cost_function(beta, d, h_beta, Cm, Cbeta, beta_prior):
