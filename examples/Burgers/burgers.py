@@ -216,15 +216,18 @@ def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max):
     # equivalent to
     #   U = sol[0,:]
     #   history_output = []
-    #   for t_i, u0, uL, beta_t in zip(t_mesh[1:], sol[1:, 0], sol[1:, -1], beta[1:, :]):
+    #   for t_i, u0, uL, beta_t in zip(t_mesh[1:], sol[1:, 0], sol[1:, -1], beta[:,1:]):
     #       U, output_iter = advance_time_step(U, (t_i, u0, uL, beta_t))
     #       history_output.append(output_iter)
     #   return U, np.vstack(history_output)
+    # NB: beta_ij = beta(x_i, t^j) => looping through time, use the transpose
+    # so that the loop selects the j-th column (looping works row-wise, not
+    # column-wise)
     _, (u_sol, errors, iters) = jax.lax.scan(advance_time_step,
                                              # initial carry value: u(x,0)
                                              sol[0, :],
                                              # thing to loop over
-                                             (t_mesh[1:], sol[1:,0], sol[1:,-1], beta[1:,:])
+                                             (t_mesh[1:], sol[1:,0], sol[1:,-1], beta[:,1:].T)
     )
 
     solution = jnp.vstack((sol[0, :], u_sol))

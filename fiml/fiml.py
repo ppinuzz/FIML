@@ -46,8 +46,8 @@ def create_basis_functions_matrix(N_basis, xi, p=3, PLOT=False, domain=None):
     else:
         # if interface nodes are passed, L calculated from the mesh would be
         # L - dx/2 - dx/2 = L - dx
-        L = domain[1] - domain[0]
-    xi = jnp.asarray(xi) / (xi[-1] - xi[0])
+        L = domain[-1] - domain[0]
+    xi = jnp.asarray(xi) / L
     B = BSpline.design_matrix(xi, knots_all, p)
     # convert to an actual (NumPy) matrix, then to a JAX array
     #   [B0(xi_0) ... B0(xi_N)]
@@ -89,7 +89,7 @@ def _quadratic_form(x, A):
     if A.ndim == 0:
         # scalar matrix: A = a * I, then A^-1 = (1/a) I
         # x^TAx = x^T(I/a)x = (1/a) x^Tx = (1/a) ||x||^2
-        Q = 0.5 * jnp.vdot(x) / A
+        Q = 0.5 * jnp.vdot(x, x) / A
     elif A.ndim == 1:
         # A is a vector of variances (i.e. diagonal matrix)
         # product of a diagonal matrix and a vector is just y_i = B_ii * x_i

@@ -71,6 +71,7 @@ probes_dir = Path('probes')
 probes_file_basic = probes_dir / 'basic.npz'
 probes_file_var_nu = probes_dir / 'variable_nu.npz'
 
+cfg_file = out_dir / Path('settings.npz')
 
 out_dir.mkdir(exist_ok=True)
 probes_dir.mkdir(exist_ok=True)
@@ -156,7 +157,10 @@ if SOLVE:
                         nu=cloudpickle.dumps(nu), uL=uL, u0=u0, 
                         u_IC=cloudpickle.dumps(u_IC), max_res=max_res_var_nu, 
                         solution=sol_var_nu, description=header)
-#%%
+    # case settings
+    savez_compressed(cfg_file, x=x_mesh, t=t_mesh, L=L, T=T, 
+                     nu=cloudpickle.dumps(nu), uL=uL, u0=u0, 
+                     u_IC=cloudpickle.dumps(u_IC))
 else:
     data_basic = jnp.load(sol_file_basic)
     t_mesh = data_basic['t']
