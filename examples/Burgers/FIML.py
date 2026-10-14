@@ -304,7 +304,7 @@ def main(exp_data, mesh, BC, nu, out_dir, VIDEO, N_basis_x, N_basis_t, sigma_pri
         return float(cost), np.asarray(jac)
     
     # initial guess: no correction needed, theta = 0 (i.e. beta = 1)
-    opt = sciopt.minimize(obj_fun_and_grad, x0=7*np.ones(shape=(N_theta,)), 
+    opt = sciopt.minimize(obj_fun_and_grad, x0=np.ones(shape=(N_theta,)), 
                           method='BFGS', jac=True)
     if not opt.success:
         aux.warning('Failed optimisation: the optimiser could not find the '
@@ -323,7 +323,7 @@ def main(exp_data, mesh, BC, nu, out_dir, VIDEO, N_basis_x, N_basis_t, sigma_pri
         beta_r = fiml.beta(theta_MAP, B_x, B_t)
         
         plt.figure()
-        plt.plot(x_mesh, mean_u[IDX_TIME_PLOT,:])
+        plt.plot(x_mesh, beta_r[:,IDX_TIME_PLOT])
 # =============================================================================
 #         plt.fill_between(x_mesh, u_upper[IDX_TIME_PLOT,:], u_lower[IDX_TIME_PLOT,:], 
 #                          alpha=0.3, color='r')
@@ -336,8 +336,31 @@ def main(exp_data, mesh, BC, nu, out_dir, VIDEO, N_basis_x, N_basis_t, sigma_pri
         plt.autoscale(enable=True, axis='x', tight=True)
         plt.legend()
         plt.title(fr'$\beta$ correction at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
-        
         plt.show(block=False)
+        
+        
+        fig, ax = plt.subplots()
+        line_beta, = ax.plot(x_mesh, jnp.zeros_like(x_mesh), label=r'$\nu = \nu_0$')
+        ax.legend(loc='upper right')
+        ax.set_xlim(x_mesh[0], x_mesh[-1])
+        ax.set_ylim(0, 2)
+        # enable interactive mode
+        plt.ion()
+        plt.show(block=False)
+        for j in range(t_mesh.shape[0]):
+            # stop animation if the user closed the window
+            if not plt.fignum_exists(fig.number):
+                break
+            line_beta.set_ydata(beta_r[:,j])
+            fig.canvas.draw_idle()
+            #fig.canvas.flush_events()
+            #plt.pause(0.0000001)
+            plt.pause(0.01)
+            ax.set_title(f'$t = {t_mesh[j]:.4f}$ s')
+        plt.ioff()
+        # show figure only if it hasn't been closed by the user
+        if plt.fignum_exists(fig.number):
+            plt.show()
     
     
     #%% SAVE BINARY DATA
@@ -351,6 +374,8 @@ def main(exp_data, mesh, BC, nu, out_dir, VIDEO, N_basis_x, N_basis_t, sigma_pri
 
 
 if __name__ == '__main__':
-    main(exp_data, mesh, BC, cloudpickle.loads(cfg['nu']), out_dir, VIDEO, N_basis_x, N_basis_t,
+    nu0 = 1e-2
+    nu = lambda x, t, u, ux, uxx: nu0
+    main(exp_data, mesh, BC, nu, out_dir, VIDEO, N_basis_x, N_basis_t,
              sigma2_prior, N_sampling_prior, SEED, sigma2_obs, N_WORKERS, IDX_TIME_PLOT, RUN_PARALLEL,
              CHECK=True)

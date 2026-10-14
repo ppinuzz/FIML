@@ -251,7 +251,7 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRIT
         raise ValueError('sol must have shape (len(t_mesh), len(x_mesh))')
     
     if beta is None:
-        beta = jnp.ones_like(sol)
+        beta = jnp.ones_like(sol.T)
     else:
         beta = jnp.asarray(beta)
 

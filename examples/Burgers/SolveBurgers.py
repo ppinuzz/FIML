@@ -149,6 +149,7 @@ if SOLVE:
     print(f'Elapsed time: {time_var_nu} s ({timedelta(seconds=time_var_nu)} hours)')
     
     print(f'Saving solution to \n\t{sol_file_var_nu.resolve()}')
+    header_IC = inspect.getsourcelines(u_IC)[0][0].strip()
     header = ('Solution of Burgers equation with variable viscosity\n'
               f'x in [0,1], t in [0, {T}], nu = nu(x,t) m2/s, nu0 = {nu0} m2/s\n'
               f'{header_IC}\n'
