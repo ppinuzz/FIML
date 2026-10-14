@@ -1,2 +1,7 @@
+# mesh and solution data
 *.mesh
 *.dat
+*.npz
+
+# dump script to test snippets
+DUMP.py
