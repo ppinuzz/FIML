@@ -4,13 +4,14 @@ Core FIML utilities.
 @author: Andrea Pinardi <andrea.pinardi@polimi.it>
 """
 
-import numpy as np
+
 import matplotlib.pyplot as plt
 from scipy.interpolate import BSpline
 import jax
 # use float64, rather than float32
 jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
+#from functools import partial
 
 # no need to JIT compile it, as this function is called only once during the
 # optimisation & you'd need to pass p as a static argument, as it's used to
@@ -68,6 +69,7 @@ def create_basis_functions_matrix(N_basis, xi, p=3, PLOT=False, domain=None):
     return B_mat
 
 
+#@partial(jax.jit, static_argnames=('h_beta', ))
 def cost_function(beta, d, h_beta, Cm, Cbeta, beta_prior):
     sol_beta = h_beta(beta)
     cost_data = _quadratic_form(d-sol_beta, Cm)
@@ -76,18 +78,28 @@ def cost_function(beta, d, h_beta, Cm, Cbeta, beta_prior):
     return J
 
 
+# no need to add it here: _quadratic_form() is used only in a single function
+# and that function is already JIT-compiled
+#@jax.jit
 def _quadratic_form(x, A):
-    if np.isscalar(A):
+    # make sure that x is (N, ) and not (N, 1) or similar non-sense
+    x = jnp.ravel(jnp.asarray(x))
+    A = jnp.asarray(A)
+    
+    if A.ndim == 0:
         # scalar matrix: A = a * I, then A^-1 = (1/a) I
         # x^TAx = x^T(I/a)x = (1/a) x^Tx = (1/a) ||x||^2
-        Q = 0.5 * np.linalg.norm(x)**2 / A**2 
-    else:
-        # vector of diagonal elements
-        A_diag = np.diagonal(A)
-        if np.array_equal(A, np.diag(A_diag)):
-            # diagonal matrix
-            A_inv = (1 / A_diag) * np.identity(A.shape[0])
-        else:
-            A_inv = np.linalg.inv(A)
-        Q = 0.5 * x.T @ A_inv @ x
+        Q = 0.5 * jnp.vdot(x) / A
+    elif A.ndim == 1:
+        # A is a vector of variances (i.e. diagonal matrix)
+        # product of a diagonal matrix and a vector is just y_i = B_ii * x_i
+        # => x^T * A^-1 * x = sum_i x_i A^-1_ii x_i
+        A_inv = 1 / A   # only diagonal elements
+        Q = 0.5 * jnp.sum(x**2 * A_inv)
+    elif A.ndim == 2:
+        # full covariance matrix (not diagonal)
+        # x^T A^-1 x = x^T (A^-1 x) = x^T y
+        # where y is the solution of the system Ay = x => more efficient and
+        # stable than calculating the inverse with jnp.inv(A)
+        Q = 0.5 * x.T @ (jnp.linalg.solve(A, x))
     return Q
