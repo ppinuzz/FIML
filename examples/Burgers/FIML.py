@@ -68,6 +68,9 @@ exact_case = 'variable_nu.npz'
 probes_dir = Path('probes')
 exp_data_file = probes_dir / exact_case
 
+# exact beta, for comparison
+beta_exact_file = sol_dir / 'beta.npz'
+
 # case settings
 cfg_file = sol_dir / 'settings.npz'
 
@@ -118,7 +121,8 @@ IDX_TIME_PLOT = -1
 #%% READ DATA
 
 # "experimental data" from probes
-exp_data = np.load(exp_data_file)
+exp_data = jnp.load(exp_data_file)
+beta_exact = jnp.load(beta_exact_file)
 
 # time and mesh data
 x_mesh = jnp.linspace(0, 1, 1001)
@@ -138,9 +142,9 @@ BC = {'u0': cfg['u0'],
       }
 
 
-def main(exp_data, mesh, BC, nu, out_dir, VIDEO, N_basis_x, N_basis_t, sigma_prior2, 
+def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma_prior2, 
          N_sampling_prior, SEED, sigma2_obs, N_WORKERS, IDX_TIME_PLOT, RUN_PARALLEL,
-         CHECK):
+         CHECK=False, VIDEO=False, beta_exact=None):
     
     # MESH DATA
     x_mesh = jnp.asarray(mesh['x'])
@@ -369,13 +373,13 @@ def main(exp_data, mesh, BC, nu, out_dir, VIDEO, N_basis_x, N_basis_t, sigma_pri
     print(f'Saving data to binary file \n\t{binary_out_file.resolve()}')
     np.savez(binary_out_file, x_mesh=x_mesh, t_mesh=t_mesh,
              sol_samples=solution_corrected, mean_samples=mean_u, 
-             sigma_samples=sigma_u, theta_MAP=theta_MAP, sol_MAP=sol_MAP
-             )
+             sigma_samples=sigma_u, theta_MAP=theta_MAP, sol_MAP=sol_MAP,
+             beta=beta_r)
 
 
 if __name__ == '__main__':
     nu0 = 1e-2
     nu = lambda x, t, u, ux, uxx: nu0
-    main(exp_data, mesh, BC, nu, out_dir, VIDEO, N_basis_x, N_basis_t,
-             sigma2_prior, N_sampling_prior, SEED, sigma2_obs, N_WORKERS, IDX_TIME_PLOT, RUN_PARALLEL,
-             CHECK=True)
+    main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior, 
+         N_sampling_prior, SEED, sigma2_obs, N_WORKERS, IDX_TIME_PLOT, RUN_PARALLEL,
+         CHECK, VIDEO, beta_exact)
