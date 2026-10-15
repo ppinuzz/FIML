@@ -27,7 +27,7 @@ import burgers
 #%% USER INPUT
 
 VIDEO = False
-SOLVE = True
+SOLVE = False
 EXTRACT_PROBES = False
 
 # space-time domain size
@@ -51,9 +51,13 @@ uL = 0
 # FIXME: current signature contains also u_xx, but it's NOT implemented a 
 # dependence on u_xx, as the Jacobian wouldn't be tridiagonal => use GMRES and
 # a different solver (currently not implemented)
-nu = lambda x, t, u, ux, uxx: nu0 * (1 + 200*jnp.sin(jnp.pi*x/L)*(1-jnp.exp(-t)))
+#nu = lambda x, t, u, ux, uxx: nu0 * (1 + 20*jnp.sin(jnp.pi*x/L)*(1-jnp.exp(-t)))
+nu = lambda x, t, u, ux, uxx: nu0 * (1 + 20*jnp.sin(jnp.pi*x/L)*(1-jnp.exp(-jnp.abs(u))) + 0.5*jnp.abs(ux))
 # dummy function for constant viscosity
 nu0_fun = lambda x, t, u, ux, uxx: nu0
+
+# beta correction
+beta = lambda x, t, u, ux, uxx: nu(x, t, u, ux, uxx) / nu0_fun(x, t, u, ux, uxx)
 
 # probes settings
 N_probes = 10
@@ -66,6 +70,7 @@ x_probes = jnp.linspace(dx_in_out, L-dx_in_out, N_probes)
 out_dir = Path('solution')
 sol_file_basic = out_dir / 'basic.npz'
 sol_file_var_nu = out_dir / 'variable_nu.npz'
+beta_file = out_dir / 'beta.npz'
 
 probes_dir = Path('probes')
 probes_file_basic = probes_dir / 'basic.npz'
@@ -162,15 +167,39 @@ if SOLVE:
     savez_compressed(cfg_file, x=x_mesh, t=t_mesh, L=L, T=T, 
                      nu=cloudpickle.dumps(nu), uL=uL, u0=u0, 
                      u_IC=cloudpickle.dumps(u_IC))
+    
+    
+    #%% EVALUATE EXACT BETA CORRECTION (for reference)
+    
+    ux = jnp.gradient(sol_var_nu, x_mesh, axis=1)
+    # jnp.gradient() is 1st order at the boundaries => manually calculate the
+    # 2nd order derivatives
+    dx = x_mesh[1] - x_mesh[0]
+    ux = ux.at[:, 0].set(
+            (-3*sol_var_nu[:, 0] + 4*sol_var_nu[:, 1] - sol_var_nu[:, 2]) / (2*dx)
+        )
+    ux = ux.at[:, -1].set(
+            (3*sol_var_nu[:, -1] - 4*sol_var_nu[:, -2] + sol_var_nu[:, -3]) / (2*dx)
+        )
+    beta_eval = jax.vmap(
+                    lambda t, u, ux_t: beta(x_mesh, t, u, ux_t, None)
+                    )(t_mesh, sol_var_nu, ux)
+    savez_compressed(beta_file, x=x_mesh, t=t_mesh, u=sol_var_nu, ux=ux, uxx=None,
+                     nu_exact=cloudpickle.dumps(nu), 
+                     nu_approx=cloudpickle.dumps(nu0_fun), 
+                     beta=beta_eval)
 else:
     data_basic = jnp.load(sol_file_basic)
     t_mesh = data_basic['t']
+    x_mesh = data_basic['x']
     max_res_basic = data_basic['max_res']
     sol_basic = data_basic['solution']
     data_var_nu = jnp.load(sol_file_var_nu)
-    # HACK: assuming same time mesh
+    # HACK: assuming same time and space mesh
     max_res_var_nu = data_var_nu['max_res']
     sol_var_nu = data_var_nu['solution']
+    data_beta = jnp.load(beta_file)
+    beta_eval = data_beta['beta']
 
 
 #%% EXTRACT "PROBES DATA"
@@ -204,48 +233,77 @@ if EXTRACT_PROBES:
 
 #%% PLOT SOLUTION
 
-plt.figure()
-plt.plot(x_mesh, u_IC(x_mesh), label='$u(x,0)$')
-plt.plot(x_mesh, sol_basic[-1,:], label=r'$u$ with $\nu = \nu_0$')
-plt.plot(x_mesh, sol_var_nu[-1,:], label=r'$u$ with $\nu = \nu(x,t,u,u_x)$')
-plt.xlabel('x [m]')
-plt.ylabel('u [m/s]')
-plt.autoscale(enable=True, axis='x', tight=True)
-plt.legend()
-plt.title(f'$t = T = {T}$ s')
-plt.show(block=False)
-
-# =============================================================================
-# plt.figure()
-# plt.plot(x_mesh, jnp.full_like(x_mesh, nu0), label=r'$\nu = \nu_0$')
-# plt.plot(x_mesh, nu(x_mesh, T, sol_var_nu[-1,:]), label=r'$\nu = \nu(x,t,u,u_x)$')
-# plt.xlabel('x [m]')
-# plt.ylabel(r'$\nu$ [m$^2$/s]')
-# plt.autoscale(enable=True, axis='x', tight=True)
-# plt.legend()
-# plt.title(rf'$\nu(x, t={T})$')
-# plt.show(block=False)
-# =============================================================================
-
-plt.figure()
-plt.semilogy(t_mesh, max_res_basic, label=r'$\nu = \nu_0$')
-plt.semilogy(t_mesh, max_res_var_nu, label=r'$\nu = \nu(x,t,u,u_x)$')
-plt.xlabel('t [s]')
-plt.ylabel(r'$\max|\mathcal{B}(u^k)|$ [m/s$^2$]')
-plt.autoscale(enable=True, axis='x', tight=True)
-plt.title('Maximum residual')
-plt.legend()
-# non blocking, so that it won't wait for the user to close the window
-plt.show(block=False)
-#plt.show()
+if SOLVE:
+    plt.figure()
+    plt.plot(x_mesh, u_IC(x_mesh), label='$u(x,0)$')
+    plt.plot(x_mesh, sol_basic[-1,:], label=r'$u$ with $\nu = \nu_0$')
+    plt.plot(x_mesh, sol_var_nu[-1,:], label=r'$u$ with $\nu = \nu(x,t,u,u_x)$')
+    plt.xlabel('x [m]')
+    plt.ylabel('u [m/s]')
+    plt.autoscale(enable=True, axis='x', tight=True)
+    plt.legend()
+    plt.title(f'$t = T = {T}$ s')
+    plt.show(block=False)
+    
+    # =============================================================================
+    # plt.figure()
+    # plt.plot(x_mesh, jnp.full_like(x_mesh, nu0), label=r'$\nu = \nu_0$')
+    # plt.plot(x_mesh, nu(x_mesh, T, sol_var_nu[-1,:]), label=r'$\nu = \nu(x,t,u,u_x)$')
+    # plt.xlabel('x [m]')
+    # plt.ylabel(r'$\nu$ [m$^2$/s]')
+    # plt.autoscale(enable=True, axis='x', tight=True)
+    # plt.legend()
+    # plt.title(rf'$\nu(x, t={T})$')
+    # plt.show(block=False)
+    # =============================================================================
+    
+    plt.figure()
+    plt.semilogy(t_mesh, max_res_basic, label=r'$\nu = \nu_0$')
+    plt.semilogy(t_mesh, max_res_var_nu, label=r'$\nu = \nu(x,t,u,u_x)$')
+    plt.xlabel('t [s]')
+    plt.ylabel(r'$\max|\mathcal{B}(u^k)|$ [m/s$^2$]')
+    plt.autoscale(enable=True, axis='x', tight=True)
+    plt.title('Maximum residual')
+    plt.legend()
+    # non blocking, so that it won't wait for the user to close the window
+    plt.show(block=False)
+    #plt.show()
+    
+    plt.show()
 
 if VIDEO:
+# =============================================================================
+#     fig, ax = plt.subplots()
+#     line_basic, = ax.plot(x_mesh, jnp.zeros_like(x_mesh), label=r'$\nu = \nu_0$')
+#     line_var_nu, = ax.plot(x_mesh, jnp.zeros_like(x_mesh), label=r'$\nu = \nu(x,t)$')
+#     ax.legend(loc='upper right')
+#     ax.set_xlim(0, L)
+#     ax.set_ylim(-2, 2)
+#     # enable interactive mode
+#     plt.ion()
+#     plt.show(block=False)
+#     for j in range(t_mesh.shape[0]):
+#         # stop animation if the user closed the window
+#         if not plt.fignum_exists(fig.number):
+#             break
+#         line_basic.set_ydata(sol_basic[j, :])
+#         line_var_nu.set_ydata(sol_var_nu[j, :])
+#         fig.canvas.draw_idle()
+#         #fig.canvas.flush_events()
+#         #plt.pause(0.0000001)
+#         plt.pause(0.01)
+#         ax.set_title(f'$t = {t_mesh[j]:.4f}$ s')
+#     plt.ioff()
+#     # show figure only if it hasn't been closed by the user
+#     if plt.fignum_exists(fig.number):
+#         plt.show()
+# =============================================================================
+    
     fig, ax = plt.subplots()
-    line_basic, = ax.plot(x_mesh, jnp.zeros_like(x_mesh), label=r'$\nu = \nu_0$')
-    line_var_nu, = ax.plot(x_mesh, jnp.zeros_like(x_mesh), label=r'$\nu = \nu(x,t)$')
+    line, = ax.plot(x_mesh, jnp.zeros_like(x_mesh))
     ax.legend(loc='upper right')
     ax.set_xlim(0, L)
-    ax.set_ylim(-2, 2)
+    ax.set_ylim(beta_eval.min(), beta_eval.max())
     # enable interactive mode
     plt.ion()
     plt.show(block=False)
@@ -253,8 +311,7 @@ if VIDEO:
         # stop animation if the user closed the window
         if not plt.fignum_exists(fig.number):
             break
-        line_basic.set_ydata(sol_basic[j, :])
-        line_var_nu.set_ydata(sol_var_nu[j, :])
+        line.set_ydata(beta_eval[j,:])
         fig.canvas.draw_idle()
         #fig.canvas.flush_events()
         #plt.pause(0.0000001)
