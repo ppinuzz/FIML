@@ -5,6 +5,9 @@ Auxiliary functions.
 @author: Andrea Pinardi <andrea.pinardi@polimi.it>
 """
 
+import numpy as np
+from os import PathLike
+from pathlib import Path
 import jax
 # use float64, rather than float32
 jax.config.update('jax_enable_x64', True)
@@ -26,6 +29,19 @@ def warning(message):
 
     """
     print(Fore.YELLOW + message + Style.RESET_ALL)
+
+
+def check_file_or_data_input(input_obj, paran_name):
+    # https://stackoverflow.com/a/76362264/17220538
+    if isinstance(input_obj, PathLike):
+        print(f'Reading {input_obj.resolve()}')
+        input_obj = jnp.load(input_obj)
+    elif isinstance(input_obj, dict) or isinstance(input_obj, np.lib.npyio.NpzFile):
+        pass
+    else:
+        raise ValueError(f"Invalid '{paran_name}' input: either pass a Path object to a .npz file "
+                         'or pass the dictionary/npz object obtained by loading')
+    return input_obj
 
 
 @jax.jit
