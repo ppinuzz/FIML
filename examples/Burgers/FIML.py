@@ -325,19 +325,22 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma_prior2,
     _, sol_MAP, max_res_MAP = run_solver_case(None, theta_MAP, N_basis_x, N_basis_t, 
                                 B_x, B_x_interf, B_t, nu, x_mesh, t_mesh,
                                 u_IC, u0, uL, out_dir=None)
+    beta_r = fiml.beta(theta_MAP, B_x, B_t)
     
-    if CHECK:
-        beta_r = fiml.beta(theta_MAP, B_x, B_t)
+    
+    if CHECK and beta_exact is not None:
+        # interpolate exact beta at required time instant...
+        beta_interp_t = jax.vmap(lambda beta_ex: jnp.interp(t_mesh, beta_exact['t'], beta_ex), 
+                                 in_axes=1, out_axes=1
+                                 )(beta_exact['beta'])
+        # and re-interpolate it over the actual mesh
+        beta_interp_xt = jax.vmap(lambda beta_t: jnp.interp(x_mesh, beta_exact['x'], beta_t), 
+                                  in_axes=0, out_axes=0
+                                  )(beta_interp_t)
         
         plt.figure()
-        plt.plot(x_mesh, beta_r[:,IDX_TIME_PLOT])
-# =============================================================================
-#         plt.fill_between(x_mesh, u_upper[IDX_TIME_PLOT,:], u_lower[IDX_TIME_PLOT,:], 
-#                          alpha=0.3, color='r')
-#         plt.plot(x_mesh, u_upper[IDX_TIME_PLOT,:], color='r')
-#         plt.plot(x_mesh, u_lower[IDX_TIME_PLOT,:], color='r')
-#         plt.plot(x_exp, sol_exp_interp_t[IDX_TIME_PLOT], '*', label='Experiment')
-# =============================================================================
+        plt.plot(x_mesh, beta_r[:,IDX_TIME_PLOT], label=r'Calculated $\beta(x,t)$')
+        plt.plot(x_mesh, beta_interp_xt[IDX_TIME_PLOT,:], label=r'Exact $\beta(x,t, u, u_x)$')
         plt.xlabel(r'$x$ [-]')
         plt.ylabel(r'$\beta$ [-]')
         plt.autoscale(enable=True, axis='x', tight=True)
