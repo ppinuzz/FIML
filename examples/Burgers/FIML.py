@@ -84,7 +84,7 @@ VIDEO = True
 N_basis_x = 5
 N_basis_t = 7
 
-# variance of the prior distribution (very low => data are exact truth)
+# variance of the prior distribution
 # NB: this is sigma^2 (variance), NOT sigma (standard deviation)!
 sigma2_prior = 1e-2
 # number of drawing from the prior probabiliy distribution (should be high)
@@ -92,7 +92,7 @@ N_sampling_prior = 20
 # seed used to generate random numbers (set to None to use a random seed, set
 # to any value to have a predictable outcome)
 SEED = 123
-# for the observational covariance matrix Cm
+# for the observational covariance matrix Cm very low => data are exact truth)
 sigma2_obs = 1e-2
 
 
@@ -102,6 +102,9 @@ N_WORKERS = 4
 
 # if true, assume data are provided
 SKIP_PRIOR_SAMPLING = True
+
+CHECK = True
+VIDEO = False
 
 
 #%% ------------------ DO NOT TOUCH ANYTHING BELOW THIS LINE ------------------
@@ -342,30 +345,31 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma_prior2,
         plt.title(fr'$\beta$ correction at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
         plt.show(block=False)
         
-        
-        fig, ax = plt.subplots()
-        line_beta, = ax.plot(x_mesh, jnp.zeros_like(x_mesh), label=r'$\nu = \nu_0$')
-        ax.legend(loc='upper right')
-        ax.set_xlim(x_mesh[0], x_mesh[-1])
-        ax.set_ylim(0, 2)
-        # enable interactive mode
-        plt.ion()
-        plt.show(block=False)
-        for j in range(t_mesh.shape[0]):
-            # stop animation if the user closed the window
-            if not plt.fignum_exists(fig.number):
-                break
-            line_beta.set_ydata(beta_r[:,j])
-            fig.canvas.draw_idle()
-            #fig.canvas.flush_events()
-            #plt.pause(0.0000001)
-            plt.pause(0.01)
-            ax.set_title(f'$t = {t_mesh[j]:.4f}$ s')
-        plt.ioff()
-        # show figure only if it hasn't been closed by the user
-        if plt.fignum_exists(fig.number):
-            plt.show()
+        if VIDEO:
+            fig, ax = plt.subplots()
+            line_beta, = ax.plot(x_mesh, jnp.zeros_like(x_mesh), label=r'$\nu = \nu_0$')
+            ax.legend(loc='upper right')
+            ax.set_xlim(x_mesh[0], x_mesh[-1])
+            ax.set_ylim(0, 2)
+            # enable interactive mode
+            plt.ion()
+            plt.show(block=False)
+            for j in range(t_mesh.shape[0]):
+                # stop animation if the user closed the window
+                if not plt.fignum_exists(fig.number):
+                    break
+                line_beta.set_ydata(beta_r[:,j])
+                fig.canvas.draw_idle()
+                #fig.canvas.flush_events()
+                #plt.pause(0.0000001)
+                plt.pause(0.01)
+                ax.set_title(f'$t = {t_mesh[j]:.4f}$ s')
+            plt.ioff()
+            # show figure only if it hasn't been closed by the user
+            if plt.fignum_exists(fig.number):
+                plt.show()
     
+        
     
     #%% SAVE BINARY DATA
     
