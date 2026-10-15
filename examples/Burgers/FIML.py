@@ -74,8 +74,12 @@ beta_exact_file = sol_dir / 'beta.npz'
 # case settings
 cfg_file = sol_dir / 'settings.npz'
 
-out_dir = Path('samples_corrected')
+out_dir = Path('samples')
+prior_dir = out_dir / 'prior'
+posterior_dir = out_dir / 'posterior'
 out_dir.mkdir(exist_ok=True)
+prior_dir.mkdir(exist_ok=True)
+posterior_dir.mkdir(exist_ok=True)
 
 VIDEO = True
 
@@ -89,6 +93,7 @@ N_basis_t = 7
 sigma2_prior = 1e-2
 # number of drawing from the prior probabiliy distribution (should be high)
 N_sampling_prior = 20
+N_sampling_post = 20
 # seed used to generate random numbers (set to None to use a random seed, set
 # to any value to have a predictable outcome)
 SEED = 123
@@ -105,6 +110,9 @@ SKIP_PRIOR_SAMPLING = True
 
 CHECK = True
 VIDEO = False
+
+nu0 = 1e-2
+nu = lambda x, t, u, ux, uxx: nu0
 
 
 #%% ------------------ DO NOT TOUCH ANYTHING BELOW THIS LINE ------------------
@@ -225,7 +233,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma_prior2,
                                         solution_corrected, max_res_corrected,
                                         N_basis_x, N_basis_t, B_x, B_x_interf, 
                                         B_t, nu, x_mesh, t_mesh, 
-                                        u_IC, u0, uL, out_dir)
+                                        u_IC, u0, uL, prior_dir)
     else:
         print('-------------- SEQUENTIAL RUN --------------')
         for r in range(theta_prior_samples.shape[1]):
@@ -233,12 +241,12 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma_prior2,
             theta_r = theta_prior_samples[:,r]
             _, sol_corr, max_res_corr = run_solver_case(
                         r, theta_r, N_basis_x, N_basis_t, B_x, B_x_interf, 
-                        B_t, nu, x_mesh, t_mesh, u_IC, u0, uL, out_dir)
+                        B_t, nu, x_mesh, t_mesh, u_IC, u0, uL, prior_dir)
             solution_corrected = solution_corrected.at[:,:,r].set(sol_corr)
             max_res_corrected = max_res_corrected.at[:,0,r].set(max_res_corr)
 
     run_type = 'Parallel' if RUN_PARALLEL else 'Sequential'
-    print(f'{run_type} execution finished, data have been written to \n\t{out_dir.resolve()}')
+    print(f'{run_type} execution finished, data have been written to \n\t{prior_dir.resolve()}')
     
     
     #%% CHECK: DO THE OBSERVED DATA LIE WITHIN +/- 2*SIGMA?
@@ -372,7 +380,117 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma_prior2,
             if plt.fignum_exists(fig.number):
                 plt.show()
     
+    
+    #%% CHECK MAP SOLUTION VS BASELINE
+    
+    sol_MAP_probes = aux.sample_solution_probes(sol_MAP, x_mesh, x_exp)
+    RMSE_MAP = jnp.sqrt((sol_MAP_probes - sol_exp_interp_t)**2)
+    # baseline solution (beta = 1 => theta = 0)
+    _, sol_baseline, _ = run_solver_case(None, jnp.zeros_like(theta_MAP), N_basis_x, N_basis_t, 
+                                B_x, B_x_interf, B_t, nu, x_mesh, t_mesh,
+                                u_IC, u0, uL, out_dir=None)
+    sol_baseline_probes = aux.sample_solution_probes(sol_baseline, x_mesh, x_exp)
+    RMSE_baseline = jnp.sqrt((sol_baseline_probes - sol_exp_interp_t)**2)
+    delta = RMSE_baseline - RMSE_MAP
+    # RMSE improvement w.r.t. baseline model
+    diff_RMSE = delta[delta>0] / RMSE_baseline[delta>0]
+    print(f'MAP solution outperforms baseline solution in {100*jnp.sum(jnp.sum(delta>0))/delta.size:.2f}% of the space-time points')
+    print(f'Average RMSE improvement in those points (w.r.t. baseline): {100*jnp.mean(diff_RMSE):.2f}%')
+    
+    if CHECK:
+        plt.imshow(delta, cmap='hot')
+        plt.colorbar()
+        plt.show(block=False)
+    
+    
+    #%% CALCULATE COVARIANCE OF THE POSTERIOR (HESSIAN)
+    
+    print('Calculating the (approximate) posterior covariance matrix as inverse of the hessian matrix @ MAP...')
+    H_MAP = jax.jacfwd(jax.jacfwd(J_cost_fun))(theta_MAP)
+    # rather than inverting H with inv(H), calculate is solving the linear
+    # system H*H_inv = I
+    C_beta_MAP = jnp.linalg.solve(H_MAP, jnp.eye(theta_MAP.size))
+    
+    
+    #%% EVALUATE A-POSTERIORI DISTRIBUTION
+    
+    print(f'Drawing {N_sampling_post} samples of the {N_theta}-components theta vector a-posteriori...')
+    R_chol = jnp.linalg.cholesky(C_beta_MAP)
+    key_random = jrn.key(SEED)
+    # Eq. (10) and Eq. (11) in [Parish2016]
+    s_random = jrn.normal(key_random, shape=(theta_MAP.size, N_sampling_post))
+    theta_post_samples = jax.vmap(lambda s: theta_MAP + R_chol @ s, in_axes=1, out_axes=1)(s_random)
+    
+    solution_posteriori = jnp.zeros(shape=(N_t, N_x, N_sampling_post))
+    max_res_posteriori = jnp.zeros(shape=(N_t, 1, N_sampling_post))
+    if RUN_PARALLEL:
+        print('-------------- PARALLEL RUN --------------')
+        print(f'Starting workers pool with (at most) {N_WORKERS} workers...')
+        print(f'Max number of logical CPU cores this program can call: {process_cpu_count()}')
+        solution_posteriori, max_res_posteriori = parallel.run_parallel(N_WORKERS, 
+                                        theta_post_samples.T, run_solver_case, 
+                                        solution_posteriori, max_res_posteriori,
+                                        N_basis_x, N_basis_t, B_x, B_x_interf, 
+                                        B_t, nu, x_mesh, t_mesh, 
+                                        u_IC, u0, uL, posterior_dir)
+    else:
+        print('-------------- SEQUENTIAL RUN --------------')
+        for r in range(theta_post_samples.shape[1]):
+            print(f'Running sample {r}')
+            theta_r = theta_post_samples[:,r]
+            _, sol_corr, max_res_corr = run_solver_case(
+                        r, theta_r, N_basis_x, N_basis_t, B_x, B_x_interf, 
+                        B_t, nu, x_mesh, t_mesh, u_IC, u0, uL, posterior_dir)
+            solution_posteriori = solution_posteriori.at[:,:,r].set(sol_corr)
+            max_res_posteriori = max_res_posteriori.at[:,0,r].set(max_res_corr)
+
+    run_type = 'Parallel' if RUN_PARALLEL else 'Sequential'
+    print(f'{run_type} execution finished, data have been written to \n\t{posterior_dir.resolve()}')
+    
+    
+    #%% CHECK POSTERIOR DISTRIBUTION AROUND MAP POINT
+    
+    # for each space-time point, calculate the sample mean of the N_sampling_prior
+    # solutions (1st index: space, 2nd index: time, 3rd index: sampling)
+    mean_u_post = jnp.mean(solution_posteriori, axis=2)
+    sigma_u_post = jnp.std(solution_posteriori, axis=2)
+    u_upper_post = mean_u_post + 2*sigma_u_post
+    u_lower_post = mean_u_post - 2*sigma_u_post
+    
+    if CHECK:
+        plt.figure()
+        plt.plot(x_mesh, mean_u_post[IDX_TIME_PLOT,:], label='Mean $u$')
+        plt.fill_between(x_mesh, u_upper_post[IDX_TIME_PLOT,:], u_lower_post[IDX_TIME_PLOT,:], 
+                         alpha=0.3, color='r')
+        plt.plot(x_mesh, u_upper_post[IDX_TIME_PLOT,:], color='r')
+        plt.plot(x_mesh, u_lower_post[IDX_TIME_PLOT,:], color='r')
+        plt.plot(x_exp, sol_exp_interp_t[IDX_TIME_PLOT], '*', label='Experiment')
+        plt.xlabel('$x$ [-]')
+        plt.ylabel('$u$ [-]')
+        plt.autoscale(enable=True, axis='x', tight=True)
+        plt.legend()
+        plt.title(fr'Mean a-posteriori solution with $\pm 2\sigma$ at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
+        plt.show(block=False)
         
+        plt.figure()
+        plt.plot(x_mesh, mean_u[IDX_TIME_PLOT,:], label='Mean $u$ a priori', color='b')
+        plt.fill_between(x_mesh, u_upper[IDX_TIME_PLOT,:], u_lower[IDX_TIME_PLOT,:], 
+                         alpha=0.3, color='b')
+        plt.plot(x_mesh, u_upper[IDX_TIME_PLOT,:], color='b')
+        plt.plot(x_mesh, u_lower[IDX_TIME_PLOT,:], color='b')
+        plt.plot(x_mesh, mean_u_post[IDX_TIME_PLOT,:], label='Mean $u$ a posteriori', color='r')
+        plt.fill_between(x_mesh, u_upper_post[IDX_TIME_PLOT,:], u_lower_post[IDX_TIME_PLOT,:], 
+                         alpha=0.3, color='r')
+        plt.plot(x_mesh, u_upper_post[IDX_TIME_PLOT,:], color='r')
+        plt.plot(x_mesh, u_lower_post[IDX_TIME_PLOT,:], color='r')
+        plt.plot(x_exp, sol_exp_interp_t[IDX_TIME_PLOT], 'k*', label='Experiment')
+        plt.xlabel('$x$ [-]')
+        plt.ylabel('$u$ [-]')
+        plt.autoscale(enable=True, axis='x', tight=True)
+        plt.legend()
+        plt.title(fr'Mean with $\pm 2\sigma$ at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
+        plt.show(block=False)
+    
     
     #%% SAVE BINARY DATA
     
@@ -385,8 +503,6 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma_prior2,
 
 
 if __name__ == '__main__':
-    nu0 = 1e-2
-    nu = lambda x, t, u, ux, uxx: nu0
     main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior, 
          N_sampling_prior, SEED, sigma2_obs, N_WORKERS, IDX_TIME_PLOT, RUN_PARALLEL,
          CHECK, VIDEO, beta_exact)

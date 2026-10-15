@@ -118,3 +118,4 @@ def _quadratic_form(x, A):
         # stable than calculating the inverse with jnp.inv(A)
         Q = 0.5 * x.T @ (jnp.linalg.solve(A, x))
     return Q
+
