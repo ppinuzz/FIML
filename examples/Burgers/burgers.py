@@ -265,8 +265,15 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRIT
             solver_table.add_row([f'{t:.6f}', f'{err:.5e}', str(k)])
         print(solver_table)
 
-    failed = (~np.isfinite(max_res[1:])) | (max_res[1:] >= tol)
-    if np.any(failed):
-        print(f'WARNING: {np.count_nonzero(failed)} time steps did not converge')
+    failed = (~jnp.isfinite(max_res)) | (max_res >= tol)
+    # jax.lax.cond() replaces if (...) when the object is a JAX object in a JIT
+    # compiled function
+    jax.lax.cond(jnp.any(failed), 
+                 # jax.debug.print() replaces print() in JIT-compiled functions
+                 lambda _: jax.debug.print(
+                         f'WARNING: {jnp.count_nonzero(failed)} time steps did not converge'),
+                 lambda _: None,
+                 operand=None
+                 )
 
     return sol, max_res
