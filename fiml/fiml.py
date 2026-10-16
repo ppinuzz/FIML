@@ -11,6 +11,7 @@ import jax
 # use float64, rather than float32
 jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
+import jax.random as jrn
 #from functools import partial
 import fiml.parallel as parallel
 import fiml.auxiliaries as aux
@@ -89,6 +90,43 @@ def beta(theta_r, B_x, B_t):
     return beta_r
 
 
+def prior_sampling(theta_prior, var_prior, N_samples, key):
+    theta_prior = jnp.asarray(theta_prior)
+    # shape (1,) has ndim = 1, but it's a scalar => remove dimensions equal to 1
+    var_prior = jnp.squeeze(var_prior)
+    N_theta = theta_prior.size
+    
+    if var_prior.ndim == 0:
+        # extract from normal N(0,1), move to Gaussian N(mu,sigma^2)
+        theta_prior_samples = (theta_prior[:,jnp.newaxis]
+                                   + jnp.sqrt(var_prior) * jrn.normal(
+                                       key, shape=(N_theta, N_samples))
+                            )
+    elif var_prior.ndim == 1:
+        theta_prior_samples = (theta_prior[:,jnp.newaxis]
+                               + jnp.sqrt(var_prior)[:,jnp.newaxis] * jrn.normal(
+                                   key, shape=(N_theta, N_samples))
+                               )
+    elif var_prior.ndim == 2:
+        # since the output is a theta vector, each vector is a single element
+        # of the output => returned as a matrix (?) where each row is a different
+        # sample => transpose it
+        theta_prior_samples = jrn.multivariate_normal(key,
+                                                      mean=theta_prior,
+                                                      cov=var_prior,
+                                                      shape=(N_samples,)).T
+    return theta_prior_samples
+
+
+def posterior_sampling(theta_MAP, C_beta_MAP, N_samples, key):
+    R_chol = jnp.linalg.cholesky(C_beta_MAP)
+    # Eq. (10) and Eq. (11) in [Parish2016]
+    s_random = jrn.normal(key, shape=(theta_MAP.size, N_samples))
+    theta_post_samples = jax.vmap(lambda s: theta_MAP + R_chol @ s, 
+                                  in_axes=1, out_axes=1)(s_random)
+    return theta_post_samples
+
+
 #@partial(jax.jit, static_argnames=('h_beta', ))
 def cost_function(beta, d, h_beta, Cm, Cbeta, beta_prior):
     sol_beta = h_beta(beta)
@@ -140,7 +178,7 @@ def launch_sampling(theta_samples, run_solver_case, solver_fun, N_x, N_t, N_samp
         # 2nd argument is the object looped through => 'for' loops the ROWS
         # of the matrix, but here it should loop the columns of theta_prior_samples
         # (each column is a different sample) => loop through the transpose
-        solution, mas_residual, success = parallel.run_parallel(N_WORKERS, 
+        solution, max_residual, success = parallel.run_parallel(N_WORKERS, 
                                         theta_samples, run_solver_case, 
                                         solution, max_residual, success,
                                         solver_fun, *solver_args, sample_dir)

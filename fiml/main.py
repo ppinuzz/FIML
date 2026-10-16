@@ -132,16 +132,13 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     
     # beta = 1 + sum_mq theta_mq Bm(x) Bq(t)
     # beta_prior = 1 (no correction) means theta_prior = 0
-    theta_prior = 0
+    theta_prior = np.zeros(shape=(N_theta, ))
     key_random = jrn.key(SEED)
     # each column of the matrix is one draw of the theta vector, which contains
     # the N_theta parameters of the beta(x,t) function
     print(f'Drawing {N_sampling_prior} samples of the {N_theta}-components theta vector...')
-    # extract from normal N(0,1), move to Gaussian N(mu,sigma^2)
-    theta_prior_samples = (theta_prior 
-                               + jnp.sqrt(sigma2_prior) * jrn.normal(
-                                   key_random, shape=(N_theta, N_sampling_prior))
-                        )
+    theta_prior_samples = fiml.prior_sampling(theta_prior, sigma2_prior, 
+                                              N_sampling_prior, key_random)
     
 
     #%% SOLVE CORRECTED BURGERS' EQUATION
@@ -198,9 +195,12 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
                 x_mesh, t_mesh, u_IC, u0, uL, x_probes):
         # run_id, solution, max_res
         # k-th row of solution: [t^k, u_1^k, ..., u_Nx^k] = [t^k, u(t^k)]
-        _, sol, _, _ = run_solver_case(None, theta, solver_fun, N_basis_x, N_basis_t, B_x, 
-                                    B_x_interf, B_t, nu, x_mesh, t_mesh,
-                                    u_IC, u0, uL, out_dir=None, PRINT_ERR_MSG=False)
+        _, sol, _, success = run_solver_case(None, theta, solver_fun, N_basis_x, 
+                                             N_basis_t, B_x, B_x_interf, B_t, nu, 
+                                             x_mesh, t_mesh, u_IC, u0, uL, 
+                                             out_dir=None, PRINT_ERR_MSG=False)
+        # TODO: add a check on success to crash when not converged
+        
         # [t^k, u_1^k, ...m u_Np^k]     Np = N. of probes
         sol_probes = aux.sample_solution_probes(sol, x_mesh, x_probes)
         # create a column vector of column vectors to gather the entire solution
@@ -326,11 +326,8 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     #%% EVALUATE A-POSTERIORI DISTRIBUTION
     
     print(f'Drawing {N_sampling_post} samples of the {N_theta}-components theta vector a-posteriori...')
-    R_chol = jnp.linalg.cholesky(C_beta_MAP)
     key_random = jrn.key(SEED)
-    # Eq. (10) and Eq. (11) in [Parish2016]
-    s_random = jrn.normal(key_random, shape=(theta_MAP.size, N_sampling_post))
-    theta_post_samples = jax.vmap(lambda s: theta_MAP + R_chol @ s, in_axes=1, out_axes=1)(s_random)
+    theta_post_samples = fiml.posterior_sampling(theta_MAP, C_beta_MAP, N_sampling_post, key_random)
     
     solution_posterior, max_res_posterior, success_posterior = fiml.launch_sampling(theta_post_samples.T, run_solver_case, solver_fun, N_x, N_t, 
                     N_sampling_post, (N_basis_x, N_basis_t, B_x, B_x_interf, 
@@ -340,6 +337,9 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
                                             (solution_posterior, max_res_posterior), 
                                             success_posterior)
     N_sampling_posterior = success_posterior.shape[-1]
+    if N_sampling_posterior == 0:
+        raise RuntimeError('All simulations failed during posterior sampling, '
+                           'no data to evaluate prior distribution')
     
     
     #%% CHECK POSTERIOR DISTRIBUTION AROUND MAP POINT
