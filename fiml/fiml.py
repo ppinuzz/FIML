@@ -42,12 +42,14 @@ def create_basis_functions_matrix(N_basis, xi, p=3, PLOT=False, domain=None):
     #   [B0(xi_N) ... Bn(xi_N)]
     # i.e. Bij = Bj(xi_i)
     if domain is None:
-        L = xi[-1] - xi[0]
-    else:
-        # if interface nodes are passed, L calculated from the mesh would be
-        # L - dx/2 - dx/2 = L - dx
-        L = domain[-1] - domain[0]
-    xi = jnp.asarray(xi) / L
+        domain = [xi[0], xi[1]]
+    # if interface nodes are passed, L calculated from the mesh would be
+    # L - dx/2 - dx/2 = L - dx
+    L = domain[-1] - domain[0]
+    # if original domain is [3, 7], but the interface mesh [3.5, ..., 6.5] is
+    # passed to the function, you cannot shift xi by 3.5, as the 1st point 
+    # is not at xi = 0, but at xi = (3.5-3)/4
+    xi = (jnp.asarray(xi) - domain[0]) / L
     B = BSpline.design_matrix(xi, knots_all, p)
     # convert to an actual (NumPy) matrix, then to a JAX array
     #   [B0(xi_0) ... B0(xi_N)]
