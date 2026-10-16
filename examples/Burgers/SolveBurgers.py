@@ -163,9 +163,12 @@ if SOLVE:
                         nu=cloudpickle.dumps(nu), uL=uL, u0=u0, 
                         u_IC=cloudpickle.dumps(u_IC), max_res=max_res_var_nu, 
                         solution=sol_var_nu, description=header)
-    # case settings
+    
+    
+    #%% CASE SETTINGS
+    
     savez_compressed(cfg_file, x=x_mesh, t=t_mesh, L=L, T=T, 
-                     nu=cloudpickle.dumps(nu), uL=uL, u0=u0, 
+                     nu=cloudpickle.dumps(nu0_fun), uL=uL, u0=u0, 
                      u_IC=cloudpickle.dumps(u_IC))
     
     
