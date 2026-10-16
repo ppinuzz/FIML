@@ -39,8 +39,11 @@ x0 = 0
 xL = L
 
 # discretisation steps
+# values used for the "exact solution" (extremely fine)
 dt = 3.125e-4
 dx = 7.813e-5
+#dt = 5e-3
+#dx = 1e-3
 
 # initial and boundary conditions
 u_IC = lambda x: jnp.sin(jnp.pi*x/L)

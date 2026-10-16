@@ -2,6 +2,7 @@
 *.mesh
 *.dat
 *.npz
+*.yaml
 
 # dump script to test snippets
 DUMP.py
