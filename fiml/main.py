@@ -150,6 +150,14 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
                     N_sampling_prior, (N_basis_x, N_basis_t, B_x, B_x_interf, 
                     B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), sample_dir=prior_dir, RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
     
+    solution_corrected, max_res_corrected = aux.remove_failed_runs(
+                                            (solution_corrected, max_res_corrected), 
+                                            success_corrected)
+    N_sampling_prior = solution_corrected.shape[-1]
+    if N_sampling_prior == 0:
+        raise RuntimeError('All simulations failed during prior sampling, no data to '
+                           'evaluate prior distribution')
+        
     
     #%% CHECK: DO THE OBSERVED DATA LIE WITHIN +/- 2*SIGMA?
     
@@ -324,17 +332,21 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     s_random = jrn.normal(key_random, shape=(theta_MAP.size, N_sampling_post))
     theta_post_samples = jax.vmap(lambda s: theta_MAP + R_chol @ s, in_axes=1, out_axes=1)(s_random)
     
-    solution_posteriori, max_res_posteriori, success_posteriori = fiml.launch_sampling(theta_post_samples.T, run_solver_case, solver_fun, N_x, N_t, 
+    solution_posterior, max_res_posterior, success_posterior = fiml.launch_sampling(theta_post_samples.T, run_solver_case, solver_fun, N_x, N_t, 
                     N_sampling_post, (N_basis_x, N_basis_t, B_x, B_x_interf, 
                     B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), sample_dir=posterior_dir, RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
+    
+    solution_posterior, max_res_posterior = aux.remove_failed_runs(
+                                            (solution_posterior, max_res_posterior), 
+                                            success_posterior)
+    N_sampling_posterior = success_posterior.shape[-1]
     
     
     #%% CHECK POSTERIOR DISTRIBUTION AROUND MAP POINT
     
-    # for each space-time point, calculate the sample mean of the N_sampling_prior
-    # solutions (1st index: space, 2nd index: time, 3rd index: sampling)
-    mean_u_post = jnp.mean(solution_posteriori, axis=2)
-    sigma_u_post = jnp.std(solution_posteriori, axis=2)
+    # (1st index: space, 2nd index: time, 3rd index: sampling)
+    mean_u_post = jnp.mean(solution_posterior, axis=2)
+    sigma_u_post = jnp.std(solution_posterior, axis=2)
     u_upper_post = mean_u_post + 2*sigma_u_post
     u_lower_post = mean_u_post - 2*sigma_u_post
     

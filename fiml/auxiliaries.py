@@ -44,6 +44,25 @@ def check_file_or_data_input(input_obj, paran_name):
     return input_obj
 
 
+def remove_failed_runs(run_data, converged):
+    N_runs = converged.size
+    # flag failed runs and remove their data to avoid skewing the distribution
+    if (~converged).any():
+        warning(f'{sum(converged)}/{N_runs} simulation failed\n'
+                'Removing failed simulation data...')
+        clean_data = []
+        for data in run_data:
+            # ellipsis (...) is the same as ':' for all previous dimensions
+            data = data[..., converged]
+            clean_data.append(data)
+        print(f'Number of samples modified from {N_runs} (user input) to {converged.size} (non-failed simulations)...')
+    else:
+        clean_data = run_data
+    # unpack the list: specify they're part of the same 1-element return tuple
+    # https://stackoverflow.com/a/74318655/17220538
+    return (*clean_data, )
+
+
 @jax.jit
 def sample_solution_probes(solution, x_mesh, x_probes):
     # interpolate u(x, t=t^k) from mesh to probe locations

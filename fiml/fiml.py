@@ -13,6 +13,8 @@ jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
 #from functools import partial
 import fiml.parallel as parallel
+import fiml.auxiliaries as aux
+
 
 # no need to JIT compile it, as this function is called only once during the
 # optimisation & you'd need to pass p as a static argument, as it's used to
@@ -128,7 +130,9 @@ def launch_sampling(theta_samples, run_solver_case, solver_fun, N_x, N_t, N_samp
     # 2nd dimension 1 is not really needed, but that way they have the same
     # calling scheme (time, space, sample)
     max_residual = jnp.zeros(shape=(N_t, 1, N_samples))
-    success = jnp.zeros(shape=(N_t, 1, N_samples))
+    # the array will contain numbers 0/1, but they will be treated as booleans
+    # (because int(0) == False and int(1) == True)
+    success = jnp.zeros(shape=(N_samples, ), dtype=bool)
     if RUN_PARALLEL:
         print('-------------- PARALLEL RUN --------------')
         print(f'Starting workers pool with (at most) {N_WORKERS} workers...')
