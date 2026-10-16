@@ -64,10 +64,10 @@ else:
     sigma2_obs = float(input_data['variance_observational'])
     
     SEED = int(input_data['seed'])
-    RUN_PARALLEL = bool(input_data['run_parallel'])
+    RUN_PARALLEL = input_data['run_parallel']
     N_WORKERS = int(input_data['parallel_workers'])
-    CHECK = bool(input_data['check_outputs'])
-    VIDEO = bool(input_data['show_videos'])
+    CHECK = input_data['check_outputs']
+    VIDEO = input_data['show_videos']
 
 
 
@@ -91,5 +91,5 @@ BC = {'u0': cfg['u0'],
 if __name__ == '__main__':
     fiml.main.main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t,
                    sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,
-                   N_WORKERS, RUN_PARALLEL, solve_Burgers, CHECK=False, VIDEO=False,
-                   beta_exact=None, IDX_TIME_PLOT=-1)
+                   N_WORKERS, RUN_PARALLEL, solve_Burgers, CHECK, VIDEO,
+                   beta_exact, IDX_TIME_PLOT=-1)
