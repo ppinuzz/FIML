@@ -42,7 +42,7 @@ def create_basis_functions_matrix(N_basis, xi, p=3, PLOT=False, domain=None):
     #   [B0(xi_N) ... Bn(xi_N)]
     # i.e. Bij = Bj(xi_i)
     if domain is None:
-        domain = [xi[0], xi[1]]
+        domain = [xi[0], xi[-1]]
     # if interface nodes are passed, L calculated from the mesh would be
     # L - dx/2 - dx/2 = L - dx
     L = domain[-1] - domain[0]
