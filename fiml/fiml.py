@@ -4,7 +4,7 @@ Core FIML utilities.
 @author: Andrea Pinardi <andrea.pinardi@polimi.it>
 """
 
-
+from os import process_cpu_count
 import matplotlib.pyplot as plt
 from scipy.interpolate import BSpline
 import jax
@@ -12,6 +12,7 @@ import jax
 jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
 #from functools import partial
+import fiml.parallel as parallel
 
 # no need to JIT compile it, as this function is called only once during the
 # optimisation & you'd need to pass p as a static argument, as it's used to
@@ -121,3 +122,35 @@ def _quadratic_form(x, A):
         Q = 0.5 * x.T @ (jnp.linalg.solve(A, x))
     return Q
 
+
+def launch_sampling(theta_samples, run_solver_case, solver_fun, N_x, N_t, N_samples,  solver_args, sample_dir=None, RUN_PARALLEL=False, N_WORKERS=1):
+    solution = jnp.zeros(shape=(N_t, N_x, N_samples))
+    # 2nd dimension 1 is not really needed, but that way they have the same
+    # calling scheme (time, space, sample)
+    max_residual = jnp.zeros(shape=(N_t, 1, N_samples))
+    success = jnp.zeros(shape=(N_t, 1, N_samples))
+    if RUN_PARALLEL:
+        print('-------------- PARALLEL RUN --------------')
+        print(f'Starting workers pool with (at most) {N_WORKERS} workers...')
+        print(f'Max number of logical CPU cores this program can call: {process_cpu_count()}')
+        # 2nd argument is the object looped through => 'for' loops the ROWS
+        # of the matrix, but here it should loop the columns of theta_prior_samples
+        # (each column is a different sample) => loop through the transpose
+        solution, mas_residual, success = parallel.run_parallel(N_WORKERS, 
+                                        theta_samples, run_solver_case, 
+                                        solution, max_residual, success,
+                                        solver_fun, *solver_args, sample_dir)
+    else:
+        print('-------------- SEQUENTIAL RUN --------------')
+        for r in range(theta_samples.shape[1]):
+            print(f'Running sample {r}')
+            theta_r = theta_samples[:,r]
+            _, sol, max_res, status = run_solver_case(
+                        r, theta_r, solver_fun, *solver_args, sample_dir)
+            solution = solution.at[:,:,r].set(sol)
+            max_residual = max_residual.at[:,0,r].set(max_res)
+            success = success.at[r].set(status)
+
+    run_type = 'Parallel' if RUN_PARALLEL else 'Sequential'
+    print(f'{run_type} execution finished, data have been written to \n\t{sample_dir.resolve()}')
+    return solution, max_residual, success

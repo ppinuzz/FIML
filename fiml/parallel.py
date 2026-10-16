@@ -12,7 +12,8 @@ jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
 
 
-def run_parallel(N_workers, theta, run_solver_case, solution, residuals, *solver_args):
+def run_parallel(N_workers, theta, run_solver_case, solution, residuals, success,
+                 *solver_args):
     with ProcessPoolExecutor(max_workers=N_workers) as executor:
         job_handles = {}
         for r, theta_r in enumerate(theta):
@@ -41,9 +42,10 @@ def run_parallel(N_workers, theta, run_solver_case, solution, residuals, *solver
                 # residuals' 2nd dimension 1 is not really needed, but that way 
                 # they have the same calling scheme (time, space, sample) as
                 # the solution object
-                _, sol, res = job.result()
+                _, sol, res, status = job.result()
                 solution = solution.at[:,:,sample_num].set(jnp.asarray(sol))
                 residuals = residuals.at[:,0,sample_num].set(jnp.asarray(res))
+                success = success.at[sample_num].set(jnp.asarray(status))
             except Exception as exc:
                 # sample_id is not available here because .result() crashed
                 # => use sample_num, which should be equal
@@ -51,7 +53,7 @@ def run_parallel(N_workers, theta, run_solver_case, solution, residuals, *solver
             else:
                 print(f'Job {sample_num} completed successfully')
     
-    return solution, residuals
+    return solution, residuals, success
 
 
 def _run_serialised(inputs):
