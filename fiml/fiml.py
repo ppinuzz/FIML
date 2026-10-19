@@ -101,6 +101,12 @@ def _beta_basis_functions(theta_r, B_x, B_t):
     return beta_r
 
 
+def _beta_basis_functions_exp(theta_r, B_x, B_t):
+    # only matrix product Bx^T * Theta * Bt
+    beta_r = _beta_basis_functions(theta_r, B_x, B_t) - 1
+    beta_r = jnp.exp(beta_r)
+    return beta_r
+
 
 def prior_sampling(theta_prior, var_prior, N_samples, key):
     theta_prior = jnp.asarray(theta_prior)
