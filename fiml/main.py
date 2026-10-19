@@ -23,12 +23,10 @@ import fiml.parallel as parallel
 
 
 def run_solver_case(run_id, theta_r, solver_fun, N_basis_x, N_basis_t, B_x, B_x_interf, 
-                    B_t, nu, x_mesh, t_mesh, u_IC, u0, uL, out_dir, TOL=1e-5, BETA_MIN=1e-5,
+                    B_t, nu, x_mesh, t_mesh, u_IC, u0, uL, out_dir, TOL=1e-5, BETA_MIN=1e-2,
                     PRINT_ERR_MSG=True):
     
-    beta_r = fiml.beta(theta_r, B_x, B_t)
-    # TODO: find a way to avoid having nu < 0 (i.e. not having beta < 0)
-    beta_r = jnp.maximum(beta_r, BETA_MIN)
+    beta_r = fiml.beta(theta_r, B_x, B_t, NO_NEG=True)
     
     # apply ICs and BCs + solve corrected Burgers' eq.
     solution = jnp.zeros(shape=(t_mesh.size, x_mesh.size))

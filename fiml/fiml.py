@@ -75,7 +75,17 @@ def create_basis_functions_matrix(N_basis, xi, p=3, PLOT=False, domain=None):
     return B_mat
 
 #@jax.jit
-def beta(theta_r, B_x, B_t):
+def beta(theta_r, B_x, B_t, NO_NEG=False, BETA_MIN=1e-2):
+    beta_r = _beta_basis_functions(theta_r, B_x, B_t)
+    if NO_NEG:
+        # TODO: find a way to avoid having nu < 0 (i.e. not having beta < 0)
+        #beta_r = jnp.maximum(beta_r, BETA_MIN)
+        beta_r = BETA_MIN + (1.0 - BETA_MIN)*jax.nn.softplus(beta_r-1)/jnp.log(2)
+    
+    return beta_r
+
+
+def _beta_basis_functions(theta_r, B_x, B_t):
     N_basis_x = B_x.shape[0]
     N_basis_t = B_t.shape[0]
     # theta = vector of vectors 
@@ -87,7 +97,9 @@ def beta(theta_r, B_x, B_t):
     Theta_r = jnp.reshape(theta_r, (N_basis_x, N_basis_t))
     # correction for the entire space-time mesh (N_x x N_t)
     beta_r = 1 + B_x.T @ Theta_r @ B_t
+    
     return beta_r
+
 
 
 def prior_sampling(theta_prior, var_prior, N_samples, key):
