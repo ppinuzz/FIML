@@ -216,6 +216,8 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     h_theta = lambda theta: h_theta_sampled(theta, N_basis_x, N_basis_t, B_x, 
                                             B_x_interf, B_t, nu, x_mesh, t_mesh, 
                                             u_IC, u0, uL, x_exp)
+    # check that covariance matrix is finite, symmetryc, positive semi-definite
+    aux.check_covariance_matrix(sigma2_obs)
 
     @jax.jit
     def J_cost_fun(theta):
@@ -233,6 +235,8 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
         return float(cost), np.asarray(jac)
     
     # initial guess: no correction needed, theta = 0 (i.e. beta = 1)
+    print('Solving the optimisation problem argmin(J(theta)) to find '
+          'maximum-a-posteriori (MAP) value...')
     opt = sciopt.minimize(obj_fun_and_grad, x0=np.zeros(shape=(N_theta,)), 
                           method='BFGS', jac=True)
     aux.check_optimiser_results(opt)

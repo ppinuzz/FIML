@@ -90,6 +90,45 @@ def check_optimiser_results(opt, SCIPY=True):
         raise RuntimeError('Optimisation either failed or produced invalid results')
 
 
+def check_covariance_matrix(Cm):
+    Cm = jnp.squeeze(Cm)
+    if Cm.ndim > 2:
+        raise ValueError('Invalid number of dimensions: covariance matrix can '
+                         'only be 0D, 1D (diagonal vector) or 2D')
+    # works for 0D, 1D, 2D
+    finite = jnp.all(jnp.isfinite(Cm))
+    if not finite:
+        raise ValueError('Covariance matrix contains non-finite values')
+    
+    if Cm.ndim == 0 or Cm.ndim == 1:
+        # matrix is only diagonal => diagonal elements are variances, not
+        # covariances, therefore should all be > 0 strictly
+        positive_semi_def = (Cm > 0)
+        symmetric = True
+    else:
+        positive_semi_def = (jnp.diagonal(Cm) > 0)
+    # full covariance matrix (not diagonal-only)
+    if Cm.ndim == 2:
+        # covariance matrix should be symmetryc and semipositive-definite
+        # https://www.statlect.com/fundamentals-of-probability/covariance-matrix
+        symmetric = jnp.allclose(Cm, Cm.T)
+        if not symmetric:
+            raise ValueError('Covariance matrix is not symmetric')
+        # for REAL and SYMMETRIC matrices, Cholesky decomposition returns
+        # LinAlgError if the matrix is not positive-definite
+        # https://stackoverflow.com/a/44287862/17220538
+        # if it's positive SEMI-definite (which is okay), Cholesky will fail
+        # but the matrix is still good => add a small diagonale offset
+        # https://stackoverflow.com/a/63911811/17220538
+        # for JAX, this does NOT return a LinAlgError, but NaNs
+        R_chol = jnp.linalg.cholesky(Cm + jnp.eye(Cm)*1e-14)
+        positive_semi_def = jnp.all(jnp.isfinite(R_chol))
+    
+    if not positive_semi_def:
+        raise ValueError('Covariance matrix is not positive semi-definite')
+    
+        
+        
 @jax.jit
 def sample_solution_probes(solution, x_mesh, x_probes):
     # interpolate u(x, t=t^k) from mesh to probe locations
