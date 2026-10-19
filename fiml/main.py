@@ -74,7 +74,13 @@ def run_solver_case(run_id, theta_r, solver_fun, N_basis_x, N_basis_t, B_x, B_x_
 
 def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior, 
          N_sampling_prior, N_sampling_post, SEED, sigma2_obs, N_WORKERS, RUN_PARALLEL,
-         solver_fun, CHECK=False, VIDEO=False, beta_exact=None, IDX_TIME_PLOT=-1):
+         solver_fun, CHECK=False, VIDEO=False, beta_exact=None, BATCH=False,
+         IDX_TIME_PLOT=-1):
+    
+    if BATCH:
+        aux.warning('BATCH mode selected, turning off both CHECK and VIDEO flags...')
+        CHECK = False
+        VIDEO = False
     
     # INPUT CHECKS
     exp_data = aux.check_file_or_data_input(exp_data, 'exp_data')
