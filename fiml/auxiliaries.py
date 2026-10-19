@@ -126,7 +126,30 @@ def check_covariance_matrix(Cm):
     
     if not positive_semi_def:
         raise ValueError('Covariance matrix is not positive semi-definite')
+
+
+def save_fig(fig, fig_name, fig_dir):
+    """
+    Save Matplotlib figure in PDF, PNG and SVG ensuring minimum white margins.
+
+    Parameters
+    ----------
+    fig : matplotlib.figure.Figure
+        Handle to a Matplotlib figure to save.
+    fig_name : str
+        Filename of the figure once saved.
+    fig_dir : str or pathlib.Path
+        Path of the directory where the figure will be saved.
+
+    """
     
+    fig_dir = Path(fig_dir)
+    # create the directory (if it already exists, does nothing)
+    fig_dir.mkdir(parents=True, exist_ok=True)
+    
+    fig.savefig(fig_dir / f'{fig_name}.pdf', bbox_inches='tight')
+    fig.savefig(fig_dir / f'{fig_name}.png', bbox_inches='tight')
+    fig.savefig(fig_dir / f'{fig_name}.svg', bbox_inches='tight')
         
         
 @jax.jit

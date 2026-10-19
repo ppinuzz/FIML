@@ -177,7 +177,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     sol_exp_t = jnp.ravel(sol_exp_interp_t.T)
     
     if CHECK:
-        plt.figure()
+        fig = plt.figure()
         plt.plot(x_mesh, mean_u[IDX_TIME_PLOT,:], label='Mean $u$')
         plt.fill_between(x_mesh, u_upper[IDX_TIME_PLOT,:], u_lower[IDX_TIME_PLOT,:], 
                          alpha=0.3, color='r')
@@ -189,8 +189,8 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
         plt.autoscale(enable=True, axis='x', tight=True)
         plt.legend()
         plt.title(fr'Mean solution with $\pm 2\sigma$ at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
-        
         plt.show(block=False)
+        aux.save_fig(fig, 'mean_prior_sigma', out_dir)
     
     
     #%% FIND MAXIMUM-A-POSTERIORI BETA/THETA
@@ -258,7 +258,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
                                   in_axes=0, out_axes=0
                                   )(beta_interp_t)
         
-        plt.figure()
+        fig = plt.figure()
         plt.plot(x_mesh, beta_r[:,IDX_TIME_PLOT], label=r'Calculated $\beta(x,t)$')
         plt.plot(x_mesh, beta_interp_xt[IDX_TIME_PLOT,:], label=r'Exact $\beta(x,t, u, u_x)$')
         plt.xlabel(r'$x$ [-]')
@@ -267,6 +267,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
         plt.legend()
         plt.title(fr'$\beta$ correction at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
         plt.show(block=False)
+        aux.save_fig(fig, 'check_beta', out_dir)
         
         if VIDEO:
             fig, ax = plt.subplots()
@@ -311,9 +312,10 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     print(f'Average error improvement in those points (w.r.t. baseline): {100*jnp.mean(diff_RMSE):.2f}%')
     
     if CHECK:
-        plt.imshow(delta, cmap='hot')
+        fig = plt.imshow(delta, cmap='hot')
         plt.colorbar()
         plt.show(block=False)
+        aux.save_fig(fig, 'error_field_matrix', out_dir)
     
     
     #%% CALCULATE COVARIANCE OF THE POSTERIOR (HESSIAN)
@@ -353,7 +355,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     u_lower_post = mean_u_post - 2*sigma_u_post
     
     if CHECK:
-        plt.figure()
+        fig = plt.figure()
         plt.plot(x_mesh, mean_u_post[IDX_TIME_PLOT,:], label='Mean $u$')
         plt.fill_between(x_mesh, u_upper_post[IDX_TIME_PLOT,:], u_lower_post[IDX_TIME_PLOT,:], 
                          alpha=0.3, color='r')
@@ -366,8 +368,9 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
         plt.legend()
         plt.title(fr'Mean a-posteriori solution with $\pm 2\sigma$ at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
         plt.show(block=False)
+        aux.save_fig(fig, 'mean_posterior_sigma', out_dir)
         
-        plt.figure()
+        fig = plt.figure()
         plt.plot(x_mesh, mean_u[IDX_TIME_PLOT,:], label='Mean $u$ a priori', color='b')
         plt.fill_between(x_mesh, u_upper[IDX_TIME_PLOT,:], u_lower[IDX_TIME_PLOT,:], 
                          alpha=0.3, color='b')
@@ -385,6 +388,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
         plt.legend()
         plt.title(fr'Mean with $\pm 2\sigma$ at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
         plt.show(block=False)
+        aux.save_fig(fig, 'prior_vs_posterior', out_dir)
     
     
     #%% SAVE BINARY DATA
