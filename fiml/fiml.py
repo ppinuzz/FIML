@@ -179,7 +179,7 @@ def launch_sampling(theta_samples, run_solver_case, solver_fun, N_x, N_t, N_samp
         # of the matrix, but here it should loop the columns of theta_prior_samples
         # (each column is a different sample) => loop through the transpose
         solution, max_residual, success = parallel.run_parallel(N_WORKERS, 
-                                        theta_samples, run_solver_case, 
+                                        theta_samples.T, run_solver_case, 
                                         solution, max_residual, success,
                                         solver_fun, *solver_args, sample_dir)
     else:

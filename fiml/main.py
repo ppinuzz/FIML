@@ -149,7 +149,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
 
     #%% SOLVE CORRECTED BURGERS' EQUATION
     
-    solution_corrected, max_res_corrected, success_corrected = fiml.launch_sampling(theta_prior_samples.T, run_solver_case, solver_fun, N_x, N_t, 
+    solution_corrected, max_res_corrected, success_corrected = fiml.launch_sampling(theta_prior_samples, run_solver_case, solver_fun, N_x, N_t, 
                     N_sampling_prior, (N_basis_x, N_basis_t, B_x, B_x_interf, 
                     B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), sample_dir=prior_dir, RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
     
@@ -335,7 +335,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     key_random = jrn.key(SEED)
     theta_post_samples = fiml.posterior_sampling(theta_MAP, C_beta_MAP, N_sampling_post, key_random)
     
-    solution_posterior, max_res_posterior, success_posterior = fiml.launch_sampling(theta_post_samples.T, run_solver_case, solver_fun, N_x, N_t, 
+    solution_posterior, max_res_posterior, success_posterior = fiml.launch_sampling(theta_post_samples, run_solver_case, solver_fun, N_x, N_t, 
                     N_sampling_post, (N_basis_x, N_basis_t, B_x, B_x_interf, 
                     B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), sample_dir=posterior_dir, RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
     
