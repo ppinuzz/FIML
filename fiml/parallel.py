@@ -10,10 +10,11 @@ import cloudpickle
 import jax
 jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
-
+from time import perf_counter
 
 def run_parallel(N_workers, theta, run_solver_case, solution, residuals, success,
                  *solver_args):
+    start_time = perf_counter()
     with ProcessPoolExecutor(max_workers=N_workers) as executor:
         job_handles = {}
         for r, theta_r in enumerate(theta):
@@ -52,6 +53,8 @@ def run_parallel(N_workers, theta, run_solver_case, solution, residuals, success
                 aux.warning(f'Job {sample_num} failed with error message: {exc.args[0]}')
             else:
                 print(f'Job {sample_num} completed successfully')
+    elapsed_time = perf_counter() - start_time
+    print(f'Total parallel execution time: {elapsed_time:.3f} s')
     
     return solution, residuals, success
 
