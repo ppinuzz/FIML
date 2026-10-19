@@ -336,7 +336,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     solution_posterior, max_res_posterior = aux.remove_failed_runs(
                                             (solution_posterior, max_res_posterior), 
                                             success_posterior)
-    N_sampling_posterior = success_posterior.shape[-1]
+    N_sampling_posterior = jnp.count_nonzero(success_posterior)
     if N_sampling_posterior == 0:
         raise RuntimeError('All simulations failed during posterior sampling, '
                            'no data to evaluate prior distribution')
