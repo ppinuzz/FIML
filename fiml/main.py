@@ -237,14 +237,8 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     # initial guess: no correction needed, theta = 0 (i.e. beta = 1)
     opt = sciopt.minimize(obj_fun_and_grad, x0=np.zeros(shape=(N_theta,)), 
                           method='BFGS', jac=True)
-    if not opt.success:
-        aux.warning('Failed optimisation: the optimiser could not find the '
-                    'maximum-a-posteiori (MAP) value of theta by solving '
-                    'theta_MAP = argmin(J(theta))')
-    print(f'Cost function value at MAP point     : {opt.fun}')
-    print(f'Number of optimiser iterations       : {opt.nit}')
-    print(f'Number of cost function evaluations  : {opt.nfev}')
-    print(f'Number of gradient evaluations       : {opt.njev}')
+    aux.check_optimiser_results(opt)
+    
     theta_MAP = opt.x
     _, sol_MAP, max_res_MAP, success_MAP = run_solver_case(None, theta_MAP, solver_fun, N_basis_x, N_basis_t, 
                                 B_x, B_x_interf, B_t, nu, x_mesh, t_mesh,

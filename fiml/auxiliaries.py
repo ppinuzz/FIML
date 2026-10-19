@@ -64,6 +64,32 @@ def remove_failed_runs(run_data, converged):
     return (*clean_data, )
 
 
+def check_optimiser_results(opt, SCIPY=True):
+    success = True
+    print(f'Cost function value at MAP point     : {opt.fun}\n'
+          f'Number of optimiser iterations       : {opt.nit}\n'
+          f'Number of cost function evaluations  : {opt.nfev}\n'
+          f'Number of Jacobian evaluations       : {opt.njev}')
+    if not opt.success:
+        success = False
+        warning('Failed optimisation: the optimiser could not find the '
+                'maximum-a-posteiori (MAP) value by solving argmin(J(theta)).\n'
+                f'Solver status: {opt.status}\n'
+                f'Solver message: {opt.message}')
+    if not jnp.all(jnp.isfinite(opt.x)):
+        success = False
+        warning('Non-finite MAP coefficients')
+    if not jnp.all(jnp.isfinite(opt.jac)):
+        success = False
+        warning('Non-finite MAP Jacobian')
+    if 'hess' in opt.keys():
+        if not jnp.all(jnp.isfinite(opt.hess)):
+            success = False
+            warning('Non-finite MAP Hessian')
+    if not success:
+        raise RuntimeError('Optimisation either failed or produced invalid results')
+
+
 @jax.jit
 def sample_solution_probes(solution, x_mesh, x_probes):
     # interpolate u(x, t=t^k) from mesh to probe locations
