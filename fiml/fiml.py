@@ -183,11 +183,11 @@ def handle_failed_runs(run_data, success, strategy='remove', MAX_FAIL_RATE=0.01)
 
 #@partial(jax.jit, static_argnames=('h_beta', ))
 def cost_function(beta, d, h_beta, Cm, Cbeta, beta_prior):
-    sol_beta = h_beta(beta)
+    sol_beta, success = h_beta(beta)
     cost_data = _quadratic_form(d-sol_beta, Cm)
     cost_beta = _quadratic_form(beta-beta_prior, Cbeta)
     J = cost_data + cost_beta
-    return J
+    return J, success
 
 
 # no need to add it here: _quadratic_form() is used only in a single function

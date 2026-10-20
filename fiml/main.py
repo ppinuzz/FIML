@@ -212,7 +212,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
         # as [u(x,t^0), ..., u(x,t^Nt)] => flatten array in column-major order 
         # (Fortran-style) 
         sol_vet = jnp.ravel(sol_probes.T)
-        return sol_vet
+        return sol_vet, success
     
     h_theta = lambda theta: h_theta_sampled(theta, N_basis_x, N_basis_t, B_x, 
                                             B_x_interf, B_t, nu, x_mesh, t_mesh, 
@@ -220,19 +220,34 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     # check that covariance matrix is finite, symmetryc, positive semi-definite
     aux.check_covariance_matrix(sigma2_obs)
 
+    def cost_and_status(theta):
+        cost, success = fiml.cost_function(theta, d=sol_exp_t, h_beta=h_theta, 
+                                  Cm=sigma2_obs, Cbeta=sigma2_prior, beta_prior=theta_prior)
+        return cost, success
+
     @jax.jit
     def J_cost_fun(theta):
-        return fiml.cost_function(theta, d=sol_exp_t, h_beta=h_theta, 
-                                  Cm=sigma2_obs, Cbeta=sigma2_prior, beta_prior=theta_prior)
+        # 2nd argument is the success flag, 1st is the numerical cost
+        return cost_and_status(theta)[0]
+    
     @jax.jit
     def cost_and_jacobian(theta):
-        cost = J_cost_fun(theta)
+        cost, success = cost_and_status(theta)
         cost_jac = jax.jacfwd(J_cost_fun)(theta)
-        return (cost, cost_jac)
+        return cost, cost_jac, success
+    
     # convert output types from JAX to SciPy
     def obj_fun_and_grad(theta):
         # JAX input -> NumPy output
-        cost, jac = cost_and_jacobian(jnp.asarray(theta))
+        cost, jac, success = cost_and_jacobian(jnp.asarray(theta))
+        
+        if not success:
+            raise RuntimeError(f'Forward solver failed at theta = {theta}')
+        if ~jnp.isfinite(cost):
+            raise RuntimeError(f'Non-finite cost function at theta = {theta}')
+        if ~jnp.all(jnp.isfinite(cost)):
+            raise RuntimeError(f'Non-finite cost function jacobian at theta = {theta}')
+        
         return float(cost), np.asarray(jac)
     
     # initial guess: no correction needed, theta = 0 (i.e. beta = 1)
