@@ -261,7 +261,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     _, sol_MAP, max_res_MAP, success_MAP = run_solver_case(None, theta_MAP, solver_fun, N_basis_x, N_basis_t, 
                                 B_x, B_x_interf, B_t, nu, x_mesh, t_mesh,
                                 u_IC, u0, uL, out_dir=None)
-    beta_r = jnp.maximum(fiml.beta(theta_MAP, B_x, B_t), 1e-5)
+    beta_r = fiml.beta(theta_MAP, B_x, B_t, NO_NEG=True)
     
     
     if CHECK and beta_exact is not None:
