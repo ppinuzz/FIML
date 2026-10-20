@@ -90,6 +90,28 @@ def check_optimiser_results(opt, SCIPY=True):
         raise RuntimeError('Optimisation either failed or produced invalid results')
 
 
+def _is_symmetric(A):
+    symmetric = jnp.allclose(A, A.T, rtol=1e-10, atol=1e-12)
+    return symmetric
+
+
+def _is_positive_semi_definite(A, semidef=True):
+    if semidef:
+        A_test = A + jnp.eye(A)*1e-14
+    else:
+        A_test = A
+    # for REAL and SYMMETRIC matrices, Cholesky decomposition returns
+    # LinAlgError if the matrix is not positive-definite
+    # https://stackoverflow.com/a/44287862/17220538
+    # if it's positive SEMI-definite (which is okay), Cholesky will fail
+    # but the matrix is still good => add a small diagonale offset
+    # https://stackoverflow.com/a/63911811/17220538
+    # for JAX, this does NOT return a LinAlgError, but NaNs
+    R_chol = jnp.linalg.cholesky(A_test)
+    positive_semi_def = jnp.all(jnp.isfinite(R_chol))
+    return positive_semi_def
+
+
 def check_covariance_matrix(Cm):
     Cm = jnp.squeeze(Cm)
     if Cm.ndim > 2:
@@ -109,23 +131,16 @@ def check_covariance_matrix(Cm):
         positive_semi_def = (jnp.diagonal(Cm) > 0)
     # full covariance matrix (not diagonal-only)
     if Cm.ndim == 2:
-        # covariance matrix should be symmetryc and semipositive-definite
+        # covariance matrix should be symmetric and semipositive-definite
         # https://www.statlect.com/fundamentals-of-probability/covariance-matrix
-        symmetric = jnp.allclose(Cm, Cm.T)
+        symmetric = _is_symmetric(Cm)
         if not symmetric:
             raise ValueError('Covariance matrix is not symmetric')
-        # for REAL and SYMMETRIC matrices, Cholesky decomposition returns
-        # LinAlgError if the matrix is not positive-definite
-        # https://stackoverflow.com/a/44287862/17220538
-        # if it's positive SEMI-definite (which is okay), Cholesky will fail
-        # but the matrix is still good => add a small diagonale offset
-        # https://stackoverflow.com/a/63911811/17220538
-        # for JAX, this does NOT return a LinAlgError, but NaNs
-        R_chol = jnp.linalg.cholesky(Cm + jnp.eye(Cm)*1e-14)
-        positive_semi_def = jnp.all(jnp.isfinite(R_chol))
+        
+        positive_semi_def = _is_positive_semi_definite(Cm, semidef=True)
+        if not positive_semi_def:
+            raise ValueError('Covariance matrix is not positive semi-definite')
     
-    if not positive_semi_def:
-        raise ValueError('Covariance matrix is not positive semi-definite')
 
 
 def save_fig(fig, fig_name, fig_dir):
