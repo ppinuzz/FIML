@@ -339,6 +339,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     
     print('Calculating the (approximate) posterior covariance matrix as inverse of the hessian matrix @ MAP...')
     H_MAP = jax.jacfwd(jax.jacfwd(J_cost_fun))(theta_MAP)
+    aux.check_hessian(H_MAP)
     # rather than inverting H with inv(H), calculate is solving the linear
     # system H*H_inv = I
     C_theta_MAP = jnp.linalg.solve(H_MAP, jnp.eye(theta_MAP.size))

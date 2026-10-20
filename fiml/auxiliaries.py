@@ -67,7 +67,7 @@ def check_optimiser_results(opt, SCIPY=True):
             success = False
             warning('Non-finite MAP Hessian')
     if not success:
-        raise RuntimeError('Optimisation either failed or produced invalid results')
+        raise RuntimeError('Optimisation either failed or produced invalid results')    
 
 
 def _is_symmetric(A):
@@ -120,7 +120,18 @@ def check_covariance_matrix(Cm):
         positive_semi_def = _is_positive_semi_definite(Cm, semidef=True)
         if not positive_semi_def:
             raise ValueError('Covariance matrix is not positive semi-definite')
-    
+
+
+def check_hessian(H):
+    if not jnp.all(jnp.isfinite(H)):
+        raise ValueError('Hessian matrix contains non-finite values')
+    # Hessian matrix is always symmetric (Schwarz' theorem)
+    if not _is_symmetric(H):
+        raise ValueError('Hessian matrix is not symmetric')
+    # if a mimimum point has been reached, the Hessian matrix should be
+    # positive definite
+    if not _is_positive_semi_definite(H, semidef=False):
+        raise ValueError('Hessian matrix is not positive definite')
 
 
 def save_fig(fig, fig_name, fig_dir):
