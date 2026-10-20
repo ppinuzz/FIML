@@ -331,7 +331,8 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
         fig = plt.imshow(delta, cmap='hot')
         plt.colorbar()
         plt.show(block=False)
-        aux.save_fig(fig, 'error_field_matrix', out_dir)
+        # plt.imshow() doesn't return a Figure, but an Axes object
+        aux.save_fig(fig.figure, 'error_field_matrix', out_dir)
     
     
     #%% CALCULATE COVARIANCE OF THE POSTERIOR (HESSIAN)
