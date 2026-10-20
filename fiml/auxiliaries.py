@@ -44,26 +44,6 @@ def check_file_or_data_input(input_obj, paran_name):
     return input_obj
 
 
-def remove_failed_runs(run_data, converged):
-    N_runs = converged.size
-    N_failed = N_runs - sum(converged)
-    # flag failed runs and remove their data to avoid skewing the distribution
-    if (~converged).any():
-        warning(f'{N_failed}/{N_runs} simulation failed\n'
-                'Removing failed simulation data...')
-        clean_data = []
-        for data in run_data:
-            # ellipsis (...) is the same as ':' for all previous dimensions
-            data = data[..., converged]
-            clean_data.append(data)
-        print(f'Number of samples modified from {N_runs} (user input) to {sum(converged)} (non-failed simulations)...')
-    else:
-        clean_data = run_data
-    # unpack the list: specify they're part of the same 1-element return tuple
-    # https://stackoverflow.com/a/74318655/17220538
-    return (*clean_data, )
-
-
 def check_optimiser_results(opt, SCIPY=True):
     success = True
     print(f'Cost function value at MAP point     : {opt.fun}\n'

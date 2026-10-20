@@ -145,6 +145,42 @@ def posterior_sampling(theta_MAP, C_beta_MAP, N_samples, key):
     return theta_post_samples
 
 
+def remove_failed_runs(run_data, converged):
+    N_runs = converged.size
+    N_failed = N_runs - sum(converged)
+    # flag failed runs and remove their data to avoid skewing the distribution
+    if (~converged).any():
+        aux.warning(f'{N_failed}/{N_runs} simulation failed\n'
+                'Removing failed simulation data...')
+        clean_data = []
+        for data in run_data:
+            # ellipsis (...) is the same as ':' for all previous dimensions
+            data = data[..., converged]
+            clean_data.append(data)
+        print(f'Number of samples modified from {N_runs} (user input) to {sum(converged)} (non-failed simulations)...')
+    else:
+        clean_data = run_data
+    # unpack the list: specify they're part of the same 1-element return tuple
+    # https://stackoverflow.com/a/74318655/17220538
+    return (*clean_data, )
+
+
+def handle_failed_runs(run_data, success, strategy='remove', MAX_FAIL_RATE=0.01):
+    N_failed = int(jnp.count_nonzero(~success))
+    N_total = success.size
+    fail_rate = N_failed / N_total
+    if fail_rate > MAX_FAIL_RATE:
+        aux.warning('Failure rate exceeds maximum limit: '
+                    f'{N_failed}/{N_total} = {fail_rate} > {MAX_FAIL_RATE}')
+    match strategy.lower():
+        case 'remove':
+            clean_data = remove_failed_runs(run_data, success)
+        case _:
+            raise ValueError(f"Unknown failure strategy '{strategy}'")
+    return clean_data
+
+
+
 #@partial(jax.jit, static_argnames=('h_beta', ))
 def cost_function(beta, d, h_beta, Cm, Cbeta, beta_prior):
     sol_beta = h_beta(beta)

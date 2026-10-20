@@ -151,9 +151,10 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
                     N_sampling_prior, (N_basis_x, N_basis_t, B_x, B_x_interf, 
                     B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), sample_dir=prior_dir, RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
     
-    solution_corrected, max_res_corrected = aux.remove_failed_runs(
-                                            (solution_corrected, max_res_corrected), 
-                                            success_corrected)
+    solution_corrected, max_res_corrected = fiml.handle_failed_runs(
+                                                (solution_corrected, max_res_corrected), 
+                                                success_corrected, 
+                                                strategy='remove')
     N_sampling_prior = solution_corrected.shape[-1]
     if N_sampling_prior == 0:
         raise RuntimeError('All simulations failed during prior sampling, no data to '
@@ -337,9 +338,10 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
                     N_sampling_post, (N_basis_x, N_basis_t, B_x, B_x_interf, 
                     B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), sample_dir=posterior_dir, RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
     
-    solution_posterior, max_res_posterior = aux.remove_failed_runs(
-                                            (solution_posterior, max_res_posterior), 
-                                            success_posterior)
+    solution_posterior, max_res_posterior = fiml.handle_failed_runs(
+                                                (solution_posterior, max_res_posterior), 
+                                                success_posterior, 
+                                                strategy='remove')
     N_sampling_posterior = jnp.count_nonzero(success_posterior)
     if N_sampling_posterior == 0:
         raise RuntimeError('All simulations failed during posterior sampling, '
