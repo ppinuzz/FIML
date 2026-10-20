@@ -221,8 +221,8 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     aux.check_covariance_matrix(sigma2_obs)
 
     def cost_and_status(theta):
-        cost, success = fiml.cost_function(theta, d=sol_exp_t, h_beta=h_theta, 
-                                  Cm=sigma2_obs, Cbeta=sigma2_prior, beta_prior=theta_prior)
+        cost, success = fiml.cost_function(theta, d=sol_exp_t, h_theta=h_theta, 
+                                  Cm=sigma2_obs, C_theta=sigma2_prior, theta_prior=theta_prior)
         return cost, success
 
     @jax.jit
@@ -340,14 +340,14 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     H_MAP = jax.jacfwd(jax.jacfwd(J_cost_fun))(theta_MAP)
     # rather than inverting H with inv(H), calculate is solving the linear
     # system H*H_inv = I
-    C_beta_MAP = jnp.linalg.solve(H_MAP, jnp.eye(theta_MAP.size))
+    C_theta_MAP = jnp.linalg.solve(H_MAP, jnp.eye(theta_MAP.size))
     
     
     #%% EVALUATE A-POSTERIORI DISTRIBUTION
     
     print(f'Drawing {N_sampling_post} samples of the {N_theta}-components theta vector a-posteriori...')
     key_random = jrn.key(SEED)
-    theta_post_samples = fiml.posterior_sampling(theta_MAP, C_beta_MAP, N_sampling_post, key_random)
+    theta_post_samples = fiml.posterior_sampling(theta_MAP, C_theta_MAP, N_sampling_post, key_random)
     
     solution_posterior, max_res_posterior, success_posterior = fiml.launch_sampling(theta_post_samples, run_solver_case, solver_fun, N_x, N_t, 
                     N_sampling_post, (N_basis_x, N_basis_t, B_x, B_x_interf, 

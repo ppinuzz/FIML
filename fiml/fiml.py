@@ -182,11 +182,11 @@ def handle_failed_runs(run_data, success, strategy='remove', MAX_FAIL_RATE=0.01)
 
 
 #@partial(jax.jit, static_argnames=('h_beta', ))
-def cost_function(beta, d, h_beta, Cm, Cbeta, beta_prior):
-    sol_beta, success = h_beta(beta)
-    cost_data = _quadratic_form(d-sol_beta, Cm)
-    cost_beta = _quadratic_form(beta-beta_prior, Cbeta)
-    J = cost_data + cost_beta
+def cost_function(theta, d, h_theta, Cm, C_theta, theta_prior):
+    sol_theta, success = h_theta(theta)
+    cost_data = _quadratic_form(d-sol_theta, Cm)
+    cost_theta = _quadratic_form(theta-theta_prior, C_theta)
+    J = cost_data + cost_theta
     return J, success
 
 
