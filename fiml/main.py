@@ -74,11 +74,6 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     if beta_exact is not None:
         beta_exact = aux.check_file_or_data_input(beta_exact, 'beta_exact')
     
-    prior_dir = out_dir / 'prior'
-    posterior_dir = out_dir / 'posterior'
-    prior_dir.mkdir(exist_ok=True, parents=True)
-    posterior_dir.mkdir(exist_ok=True, parents=True)
-    
     # OUTPUT DATA FILE
     out_filename = out_dir / 'output.h5'
     out_file = h5py.File(out_filename, 'w')
@@ -170,7 +165,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     
     solution_corrected, max_res_corrected, success_corrected = fiml.launch_sampling(theta_prior_samples, run_solver_case, solver_fun, N_x, N_t, 
                     N_sampling_prior, (N_basis_x, N_basis_t, B_x, B_x_interf, 
-                    B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), sample_dir=prior_dir, RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
+                    B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
     
     aux.save_sampling(out_file, 'prior', comprex_opts, theta_prior_samples, 
                       solution_corrected, max_res_corrected, success_corrected)
@@ -364,7 +359,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     
     solution_posterior, max_res_posterior, success_posterior = fiml.launch_sampling(theta_post_samples, run_solver_case, solver_fun, N_x, N_t, 
                     N_sampling_post, (N_basis_x, N_basis_t, B_x, B_x_interf, 
-                    B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), sample_dir=posterior_dir, RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
+                    B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
     
     aux.save_sampling(out_file, 'posterior', comprex_opts, theta_post_samples, 
                       solution_posterior, max_res_posterior, success_posterior)

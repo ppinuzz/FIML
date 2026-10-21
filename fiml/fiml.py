@@ -272,7 +272,7 @@ def _quadratic_form(x, A):
     return Q
 
 
-def launch_sampling(theta_samples, run_solver_case, solver_fun, N_x, N_t, N_samples,  solver_args, sample_dir=None, RUN_PARALLEL=False, N_WORKERS=1):
+def launch_sampling(theta_samples, run_solver_case, solver_fun, N_x, N_t, N_samples, solver_args, sample_dir=None, RUN_PARALLEL=False, N_WORKERS=1):
     solution = jnp.zeros(shape=(N_t, N_x, N_samples))
     # 2nd dimension 1 is not really needed, but that way they have the same
     # calling scheme (time, space, sample)
@@ -303,5 +303,5 @@ def launch_sampling(theta_samples, run_solver_case, solver_fun, N_x, N_t, N_samp
             success = success.at[r].set(status)
 
     run_type = 'Parallel' if RUN_PARALLEL else 'Sequential'
-    print(f'{run_type} execution finished, data have been written to \n\t{sample_dir.resolve()}')
+    print(f'{run_type} execution finished')
     return solution, max_residual, success
