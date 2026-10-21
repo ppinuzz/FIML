@@ -15,6 +15,7 @@ import jax.random as jrn
 #from functools import partial
 import fiml.parallel as parallel
 import fiml.auxiliaries as aux
+from prettytable import PrettyTable
 
 
 # no need to JIT compile it, as this function is called only once during the
@@ -136,8 +137,8 @@ def prior_sampling(theta_prior, var_prior, N_samples, key):
     return theta_prior_samples
 
 
-def posterior_sampling(theta_MAP, C_beta_MAP, N_samples, key):
-    R_chol = jnp.linalg.cholesky(C_beta_MAP)
+def posterior_sampling(theta_MAP, C_theta_MAP, N_samples, key):
+    R_chol = jnp.linalg.cholesky(C_theta_MAP)
     # Eq. (10) and Eq. (11) in [Parish2016]
     s_random = jrn.normal(key, shape=(theta_MAP.size, N_samples))
     theta_post_samples = jax.vmap(lambda s: theta_MAP + R_chol @ s, 
@@ -179,6 +180,60 @@ def handle_failed_runs(run_data, success, strategy='remove', MAX_FAIL_RATE=0.01)
             raise ValueError(f"Unknown failure strategy '{strategy}'")
     return clean_data
 
+
+def compare_baseline_MAP_solutions(sol_MAP, theta_baseline, solver_wrap, 
+                                   sol_exp, x, x_exp, t=None, t_exp=None,
+                                   PLOT=True, fig_name=None):
+    # baseline solution (beta = 1 => theta = 0)
+    _, sol_baseline, _, _ = solver_wrap(theta_baseline)
+    # sample both solutions at probe locations
+    sol_MAP_probes = aux.sample_solution(sol_MAP, x_mesh=x, t_mesh=t, 
+                                         x_probes=x_exp, t_probes=t_exp)
+    sol_baseline_probes = aux.sample_solution(sol_baseline, x_mesh=x, t_mesh=t, 
+                                              x_probes=x_exp, t_probes=t_exp)
+    # errors w.r.t. experimental data (actual truth)
+    err_MAP = sol_MAP_probes - sol_exp
+    err_baseline = sol_baseline_probes - sol_exp
+    
+    # mean absolute error > 0
+    MAE_MAP = jnp.mean(jnp.abs(err_MAP))
+    MAE_baseline = jnp.mean(jnp.abs(err_baseline))
+    # root mean square error > 0
+    RMSE_MAP = jnp.sqrt(jnp.mean(err_MAP**2))
+    RMSE_baseline = jnp.sqrt(jnp.mean(err_baseline**2))
+    
+    err_report = PrettyTable()
+    err_report.title = 'Error report: MAP and baseline VS experiments'
+    err_report.field_names = ['Metric', 'Baseline', 'MAP']
+    err_report.add_row(['Avg. MAE [EU]', f'{MAE_baseline:.3e}', f'{MAE_MAP:.3e}'])
+    err_report.add_row(['Avg. RMSE [EU]', f'{RMSE_baseline:.3e}', f'{RMSE_MAP:.3e}'])
+    print(err_report)
+    
+    # delta > 0: improvement w.r.t. baseline model
+    delta_MAE = MAE_baseline - MAE_MAP
+    delta_RMSE = RMSE_baseline - RMSE_MAP
+    N_delta_MAE = jnp.count_nonzero(delta_MAE > 0) / delta_MAE.size
+    N_delta_RMSE = jnp.count_nonzero(delta_RMSE > 0) / delta_RMSE.size
+    avg_delta_MAE = jnp.mean(jnp.abs(delta_MAE))
+    avg_delta_RMSE = jnp.mean(jnp.abs(delta_RMSE))
+    
+    print('How to read the table: MAP solution outperforms the baseline solution '
+          '(according to ... metric) in ...% of the time-space domain, with an average '
+          'metric improvement of ...')
+    improv_report = PrettyTable()
+    improv_report.title = 'MAP solution outperforms baseline'
+    improv_report.field_names = ['Metric', '% of space-time domain', 'Average outperform']
+    improv_report.add_row(['MAE', f'{100*N_delta_MAE:.2f}', f'{avg_delta_MAE:.3e}'])
+    improv_report.add_row(['RMSE', f'{100*N_delta_RMSE:.2f}', f'{avg_delta_RMSE:.3e}'])
+    print(improv_report)
+    
+    if PLOT:
+        fig = plt.imshow(jnp.abs(err_baseline)-jnp.abs(err_MAP), cmap='hot')
+        plt.colorbar()
+        plt.show(block=False)
+        if fig_name is not None:
+            # plt.imshow() doesn't return a Figure, but an Axes object
+            aux.save_fig(fig.figure, fig_name.stem, fig_name.parent)
 
 
 #@partial(jax.jit, static_argnames=('h_beta', ))

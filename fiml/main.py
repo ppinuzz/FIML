@@ -170,14 +170,14 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     u_upper = mean_u + 2*sigma_u
     u_lower = mean_u - 2*sigma_u
     
-    # re-interpolate experimental data over simulation time grid
-    u_probe_interp = lambda u_probe: jnp.interp(t_mesh, t_exp, u_probe)
-    sol_exp_interp_t = jax.vmap(u_probe_interp, in_axes=1, out_axes=1)(sol_exp)
-    # data are stored as [t^k, u_1^k, ..., u_N^k] => create a column vector of
-    # column vectors => flatten the 2D array in column-major order (Fortran-like)
-    sol_exp_t = jnp.ravel(sol_exp_interp_t.T)
-    
     if CHECK:
+        # re-interpolate experimental data over simulation time grid
+        u_probe_interp = lambda u_probe: jnp.interp(t_mesh, t_exp, u_probe)
+        sol_exp_interp_t = jax.vmap(u_probe_interp, in_axes=1, out_axes=1)(sol_exp)
+        # data are stored as [t^k, u_1^k, ..., u_N^k] => create a column vector of
+        # column vectors => flatten the 2D array in column-major order (Fortran-like)
+        sol_exp_t = jnp.ravel(sol_exp_interp_t.T)
+        
         fig = plt.figure()
         plt.plot(x_mesh, mean_u[IDX_TIME_PLOT,:], label='Mean $u$')
         plt.fill_between(x_mesh, u_upper[IDX_TIME_PLOT,:], u_lower[IDX_TIME_PLOT,:], 
@@ -197,17 +197,17 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     #%% FIND MAXIMUM-A-POSTERIORI BETA/THETA
     
     def h_theta_sampled(theta, N_basis_x, N_basis_t, B_x, B_x_interf, B_t, nu, 
-                x_mesh, t_mesh, u_IC, u0, uL, x_probes):
+                x_mesh, t_mesh, u_IC, u0, uL, x_probes, t_probes):
         # run_id, solution, max_res
         # k-th row of solution: [t^k, u_1^k, ..., u_Nx^k] = [t^k, u(t^k)]
         _, sol, _, success = run_solver_case(None, theta, solver_fun, N_basis_x, 
                                              N_basis_t, B_x, B_x_interf, B_t, nu, 
                                              x_mesh, t_mesh, u_IC, u0, uL, 
                                              out_dir=None, PRINT_ERR_MSG=False)
-        # TODO: add a check on success to crash when not converged
-        
+        # sample numerical solution to have it at the same probe locations
         # [t^k, u_1^k, ...m u_Np^k]     Np = N. of probes
-        sol_probes = aux.sample_solution_probes(sol, x_mesh, x_probes)
+        sol_probes = aux.sample_solution(sol, x_mesh=x_mesh, t_mesh=t_mesh, 
+                                         x_probes=x_probes, t_probes=t_probes)
         # create a column vector of column vectors to gather the entire solution
         # as [u(x,t^0), ..., u(x,t^Nt)] => flatten array in column-major order 
         # (Fortran-style) 
@@ -216,12 +216,13 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     
     h_theta = lambda theta: h_theta_sampled(theta, N_basis_x, N_basis_t, B_x, 
                                             B_x_interf, B_t, nu, x_mesh, t_mesh, 
-                                            u_IC, u0, uL, x_exp)
+                                            u_IC, u0, uL, x_exp, t_exp)
     # check that covariance matrix is finite, symmetryc, positive semi-definite
     aux.check_covariance_matrix(sigma2_obs)
 
     def cost_and_status(theta):
-        cost, success = fiml.cost_function(theta, d=sol_exp_t, h_theta=h_theta, 
+        # pass data as a column vector of column vectors
+        cost, success = fiml.cost_function(theta, d=jnp.ravel(sol_exp.T), h_theta=h_theta, 
                                   Cm=sigma2_obs, C_theta=sigma2_prior, theta_prior=theta_prior)
         return cost, success
 
@@ -312,28 +313,14 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     
     #%% CHECK MAP SOLUTION VS BASELINE
     
-    sol_MAP_probes = aux.sample_solution_probes(sol_MAP, x_mesh, x_exp)
-    err_MAP = jnp.sqrt((sol_MAP_probes - sol_exp_interp_t)**2)
-    # baseline solution (beta = 1 => theta = 0)
-    _, sol_baseline, _, _ = run_solver_case(None, jnp.zeros_like(theta_MAP), solver_fun,
-                                         N_basis_x, N_basis_t, 
-                                B_x, B_x_interf, B_t, nu, x_mesh, t_mesh,
-                                u_IC, u0, uL, out_dir=None)
-    sol_baseline_probes = aux.sample_solution_probes(sol_baseline, x_mesh, x_exp)
-    err_baseline = jnp.sqrt((sol_baseline_probes - sol_exp_interp_t)**2)
-    delta = err_baseline - err_MAP
-    # RMSE improvement w.r.t. baseline model
-    diff_RMSE = delta[delta>0] / err_baseline[delta>0]
-    print(f'MAP solution outperforms baseline solution in {100*jnp.sum(jnp.sum(delta>0))/delta.size:.2f}% of the space-time points')
-    print(f'Average error improvement in those points (w.r.t. baseline): {100*jnp.mean(diff_RMSE):.2f}%')
-    
-    if CHECK:
-        fig = plt.imshow(delta, cmap='hot')
-        plt.colorbar()
-        plt.show(block=False)
-        # plt.imshow() doesn't return a Figure, but an Axes object
-        aux.save_fig(fig.figure, 'error_field_matrix', out_dir)
-    
+    solver_wrap = lambda theta: run_solver_case(None, theta, solver_fun, 
+                                    N_basis_x, N_basis_t, B_x, B_x_interf, B_t, 
+                                    nu, x_mesh, t_mesh, u_IC, u0, uL, out_dir=None)
+    # baseline solution: beta = 1 => theta = 0
+    fiml.compare_baseline_MAP_solutions(sol_MAP, jnp.zeros_like(theta_MAP), solver_wrap, 
+                                        sol_exp, x=x_mesh, x_exp=x_exp, t=t_mesh, t_exp=t_exp,
+                                        PLOT=True)
+
     
     #%% CALCULATE COVARIANCE OF THE POSTERIOR (HESSIAN)
     

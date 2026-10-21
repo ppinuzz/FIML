@@ -142,26 +142,47 @@ def save_fig(fig, fig_name, fig_dir):
     ----------
     fig : matplotlib.figure.Figure
         Handle to a Matplotlib figure to save.
-    fig_name : str
-        Filename of the figure once saved.
-    fig_dir : str or pathlib.Path
-        Path of the directory where the figure will be saved.
+    fig_name : str or None
+        Filename of the figure once saved. If None, the image won't be saved.
+    fig_dir : str or pathlib.Path or None
+        Path of the directory where the figure will be saved. If None, the 
+        image won't be saved.
 
     """
     
-    fig_dir = Path(fig_dir)
-    # create the directory (if it already exists, does nothing)
-    fig_dir.mkdir(parents=True, exist_ok=True)
-    
-    fig.savefig(fig_dir / f'{fig_name}.pdf', bbox_inches='tight')
-    fig.savefig(fig_dir / f'{fig_name}.png', bbox_inches='tight')
-    fig.savefig(fig_dir / f'{fig_name}.svg', bbox_inches='tight')
+    if fig_name is not None and fig_dir is not None:
+        fig_dir = Path(fig_dir)
+        # create the directory (if it already exists, does nothing)
+        fig_dir.mkdir(parents=True, exist_ok=True)
         
-        
-@jax.jit
-def sample_solution_probes(solution, x_mesh, x_probes):
+        fig.savefig(fig_dir / f'{fig_name}.pdf', bbox_inches='tight')
+        fig.savefig(fig_dir / f'{fig_name}.png', bbox_inches='tight')
+        fig.savefig(fig_dir / f'{fig_name}.svg', bbox_inches='tight')
+
+
+def sample_solution(solution, x_mesh=None, t_mesh=None, x_probes=None, t_probes=None):
+    if (x_mesh is None) != (x_probes is None):
+        sol_sampled = _sample_sol_space(solution, x_mesh, x_probes)
+    elif (t_mesh is None) != (t_probes is None):
+        sol_sampled = _sample_sol_time(solution, t_mesh, t_probes)
+    elif (x_mesh, x_probes, t_mesh, t_probes) != (None, None, None, None):
+        sol_space = _sample_sol_space(solution, x_mesh, x_probes)
+        sol_sampled = _sample_sol_time(sol_space, t_mesh, t_probes)
+    else:
+        sol_sampled = None
+    return sol_sampled
+
+
+def _sample_sol_space(u, x_mesh, x_probes):
     # interpolate u(x, t=t^k) from mesh to probe locations
     interpolate = lambda u_t: jnp.interp(x_probes, x_mesh, u_t)
     # apply it to all time instants
-    u_interp = jax.vmap(interpolate)(solution)
+    u_interp = jax.vmap(interpolate)(u)
+    return u_interp
+
+
+def _sample_sol_time(u, t_mesh, t_probes):
+    interpolate = lambda u: jnp.interp(t_probes, t_mesh, u)
+    # apply it to all time instants
+    u_interp = jax.vmap(interpolate, in_axes=1, out_axes=1)(u)
     return u_interp
