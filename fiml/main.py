@@ -421,6 +421,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
         plt.legend()
         plt.title(fr'Mean with $\pm 2\sigma$ at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
         plt.show(block=False)
+        #plt.show()
         aux.save_fig(fig, 'prior_vs_posterior', out_dir)
     
     

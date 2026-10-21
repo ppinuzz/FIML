@@ -13,6 +13,7 @@ jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
 import cloudpickle
 import yaml
+import os
 
 from burgers import solve_Burgers
 FIML_pkg = Path(r'C:\Andrea\Dottorato\FIML')
@@ -24,7 +25,27 @@ import fiml
 
 #%% USER INPUT
 
-input_file = Path('test.yaml')
+if len(sys.argv) > 1:
+    # 0: filename
+    # 1: flag
+    # 2: flag argument
+    j = 1
+    while j < len(sys.argv):
+        match sys.argv[j]:
+            case '--file' | '-f':
+                # current argument is the flag => next is the filename
+                input_file = Path(os.getcwd()) / sys.argv[j+1]
+                # skip filename, so that next loop will read the next flag
+                j += 2
+            case '--help' | '-h':
+                print('Possible flags: \n'
+                      '\t --file: prescribe YAML input file \n'
+                      '\t --help: print this help')
+                quit()
+            case _:
+                raise ValueError('Unknown CLI input')
+else:
+    input_file = Path('test.yaml')
 
 if input_file is None:
     exact_sol_file = Path('solution/variable_nu.npz')
