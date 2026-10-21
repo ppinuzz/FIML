@@ -269,7 +269,7 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
             raise RuntimeError(f'Forward solver failed at theta = {theta}')
         if ~jnp.isfinite(cost):
             raise RuntimeError(f'Non-finite cost function at theta = {theta}')
-        if ~jnp.all(jnp.isfinite(cost)):
+        if ~jnp.all(jnp.isfinite(jac)):
             raise RuntimeError(f'Non-finite cost function jacobian at theta = {theta}')
         
         return float(cost), np.asarray(jac)
