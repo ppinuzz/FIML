@@ -173,6 +173,24 @@ def sample_solution(solution, x_mesh=None, t_mesh=None, x_probes=None, t_probes=
     return sol_sampled
 
 
+def save_sampling(hdf5_file, group_name, opts, theta, sol, res, success):
+    hdf5_group = hdf5_file.create_group(group_name)
+    tmp_set = hdf5_group.create_dataset(name='theta', data=theta, **opts)
+    tmp_set.attrs['description'] = ('Each column is one drow and theta contains the '
+                                    f'{theta.shape[1]} parameters required to describe '
+                                    'fully the correction beta')
+    tmp_set = hdf5_group.create_dataset(name='solution', data=sol, **opts)
+    tmp_set.attrs['description'] = ('The i-th row is the solution on all the 1D mesh for the i-th '
+                                    'time instant')
+    tmp_set = hdf5_group.create_dataset(name='max_res', data=res, **opts)
+    tmp_set.attrs['description'] = ('The i-th row contains the maximum residual for the i-th time instant')
+    tmp_set = hdf5_group.create_dataset(name='success', data=success, **opts)
+    tmp_set.attrs['description'] = ('If False, the k-th simulation did not converge or crashed')
+    # write to disk without closing the file
+    print(f'Writing data to \n\t{hdf5_file.filename}')
+    hdf5_file.flush()
+
+
 def _sample_sol_space(u, x_mesh, x_probes):
     # interpolate u(x, t=t^k) from mesh to probe locations
     interpolate = lambda u_t: jnp.interp(x_probes, x_mesh, u_t)

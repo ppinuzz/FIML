@@ -7,7 +7,6 @@ Main functions of FIML methodology.
 
 import numpy as np
 import matplotlib.pyplot as plt
-from os import process_cpu_count
 
 import jax
 # use float64, rather than float32
@@ -15,11 +14,10 @@ jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
 import jax.random as jrn
 import scipy.optimize as sciopt
-import cloudpickle
+import h5py
 
 import fiml.fiml as fiml
 import fiml.auxiliaries as aux
-import fiml.parallel as parallel
 
 
 def run_solver_case(run_id, theta_r, solver_fun, N_basis_x, N_basis_t, B_x, B_x_interf, 
@@ -34,15 +32,6 @@ def run_solver_case(run_id, theta_r, solver_fun, N_basis_x, N_basis_t, B_x, B_x_
     solution = solution.at[:,0].set(u0)
     solution = solution.at[:,-1].set(uL)
     solution, max_res = solver_fun(solution, x_mesh, t_mesh, nu, beta=beta_r, WRITE_LOG=False, tol=TOL)
-    
-    # SAVE DATA
-    # (if out_dir is None, this function has probably been called by the
-    # optimiser => no need to write data to a file)
-    if out_dir is not None:
-        # 0-padded at the beginning, to have '0005' rather than '5' (using '04d')
-        # (using 08d you can store up to 10e6 samples)
-        filename = out_dir / f'corrected_{run_id:08d}.npz'
-        np.savez_compressed(filename, solution=solution, max_res=max_res)
     
     # check if solver didn't converge or produced NaN's/Inf's
     not_converged = (max_res > TOL)
@@ -89,6 +78,15 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     posterior_dir = out_dir / 'posterior'
     prior_dir.mkdir(exist_ok=True, parents=True)
     posterior_dir.mkdir(exist_ok=True, parents=True)
+    
+    # OUTPUT DATA FILE
+    out_filename = out_dir / 'output.h5'
+    out_file = h5py.File(out_filename, 'w')
+    # common compression options
+    # shuffle: allows blocks to be moved around, possible memory gain
+    # gzip: most portable and fairly fast
+    # compression_opts: for GZIP, it's the compressione level (9: maximum)
+    comprex_opts = {'shuffle': True, 'compression': 'gzip', 'compression_opts': 9}
     
     # MESH DATA
     x_mesh = jnp.asarray(mesh['x'])
@@ -173,6 +171,9 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     solution_corrected, max_res_corrected, success_corrected = fiml.launch_sampling(theta_prior_samples, run_solver_case, solver_fun, N_x, N_t, 
                     N_sampling_prior, (N_basis_x, N_basis_t, B_x, B_x_interf, 
                     B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), sample_dir=prior_dir, RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
+    
+    aux.save_sampling(out_file, 'prior', comprex_opts, theta_prior_samples, 
+                      solution_corrected, max_res_corrected, success_corrected)
     
     solution_corrected, max_res_corrected = fiml.handle_failed_runs(
                                                 (solution_corrected, max_res_corrected), 
@@ -365,6 +366,9 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
                     N_sampling_post, (N_basis_x, N_basis_t, B_x, B_x_interf, 
                     B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), sample_dir=posterior_dir, RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
     
+    aux.save_sampling(out_file, 'posterior', comprex_opts, theta_post_samples, 
+                      solution_posterior, max_res_posterior, success_posterior)
+    
     solution_posterior, max_res_posterior = fiml.handle_failed_runs(
                                                 (solution_posterior, max_res_posterior), 
                                                 success_posterior, 
@@ -420,11 +424,6 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
         aux.save_fig(fig, 'prior_vs_posterior', out_dir)
     
     
-    #%% SAVE BINARY DATA
+    #%% CLOSE HDF5 FILE
     
-    binary_out_file = out_dir / 'data.npz'
-    print(f'Saving data to binary file \n\t{binary_out_file.resolve()}')
-    np.savez(binary_out_file, x=x_mesh, t=t_mesh,
-             prior=solution_corrected, mean_samples=mean_u, 
-             sigma_samples=sigma_u, theta_MAP=theta_MAP, sol_MAP=sol_MAP,
-             beta=beta_r)
+    out_file.close()
