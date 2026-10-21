@@ -96,9 +96,15 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     N_x = x_mesh.size
     N_t = t_mesh.size
     L = x_mesh[-1] - x_mesh[0]
+    t0 = t_mesh[0]
     T = t_mesh[-1] - t_mesh[0]
     # HACK: assuming uniform spacing in time and space
     dx = x_mesh[1] - x_mesh[0]
+    dt = t_mesh[1] - t_mesh[0]
+    if not jnp.all(jnp.isclose(jnp.diff(x_mesh), dx)):
+        raise ValueError('Only uniform space grids are supported')
+    if not jnp.all(jnp.isclose(jnp.diff(t_mesh), dt)):
+        raise ValueError('Only uniform time grids are supported')
     
     # BOUNDARY CONDITIONS
     u0 = BC['u0']
