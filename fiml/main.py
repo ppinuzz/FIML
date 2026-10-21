@@ -117,6 +117,23 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     t_exp = jnp.asarray(exp_data['t'])
     sol_exp = jnp.asarray(exp_data['solution'])
     
+    # check that experimental data and simulation data start and end at the same
+    # time instant (or that, at least, the simulation is longer than the experiment)
+    # discretisation with step dt => any number within -dt/2 and +dt/2 is associated
+    # to the instant 0
+    if t_exp[0] < t0-0.5*dt or t_exp[0] > t0+0.5*dt:
+        raise ValueError('Experimental data and simulation must start at the same time instant '
+                         '(within a dt/2)\n'
+                         f'Experimental data t0  : {t_exp[0]} s\n'
+                         f'Simulation t0         : {t0} s\n')
+    if T < t_exp[-1]:
+        aux.warning('Numerical simulation is shorter than the experimental data: \n'
+                    f'T numerical: {T} s\n'
+                    f'T experiment: {t_exp[-1]} s\n'
+                    'Limiting experimental data to numerical simulation end time T = {T} s')
+        t_exp = t_exp[t_exp <= T]
+        sol_exp = sol_exp[t_exp<=T, :]
+    
     
     #%% PARAMETRISE CORRECTION FUNCTION BETA
     
