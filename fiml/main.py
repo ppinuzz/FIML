@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Main functions of FIML methodology.
 
@@ -7,6 +6,7 @@ Main functions of FIML methodology.
 
 import numpy as np
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 import jax
 # use float64, rather than float32
@@ -75,8 +75,8 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
         beta_exact = aux.check_file_or_data_input(beta_exact, 'beta_exact')
     
     # OUTPUT DATA FILE
-    out_filename = out_dir / 'output.h5'
-    out_file = h5py.File(out_filename, 'w')
+    out_dir.mkdir(exist_ok=True)
+    out_file = h5py.File(out_dir/'output.h5', 'w')
     # common compression options
     # shuffle: allows blocks to be moved around, possible memory gain
     # gzip: most portable and fairly fast
@@ -98,6 +98,14 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
         raise ValueError('Only uniform space grids are supported')
     if not jnp.all(jnp.isclose(jnp.diff(t_mesh), dt)):
         raise ValueError('Only uniform time grids are supported')
+    
+    hdf5_group = out_file.create_group('mesh')
+    tmp_set = hdf5_group.create_dataset(name='x', data=x_mesh, **comprex_opts)
+    tmp_set.attrs['description'] = 'Spatial mesh'
+    tmp_set = hdf5_group.create_dataset(name='t', data=t_mesh, **comprex_opts)
+    tmp_set.attrs['description'] = 'Time mesh'
+    # write to disk without closing the file
+    out_file.flush()
     
     # BOUNDARY CONDITIONS
     u0 = BC['u0']
