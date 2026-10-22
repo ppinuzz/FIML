@@ -18,6 +18,7 @@ import h5py
 
 import fiml.fiml as fiml
 import fiml.auxiliaries as aux
+import fiml.post as post
 
 
 def run_solver_case(run_id, theta_r, solver_fun, N_basis_x, N_basis_t, B_x, B_x_interf, 
@@ -59,15 +60,16 @@ def run_solver_case(run_id, theta_r, solver_fun, N_basis_x, N_basis_t, B_x, B_x_
     return run_id, solution, max_res, success
 
 
-def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior, 
+def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior, 
          N_sampling_prior, N_sampling_post, SEED, sigma2_obs, N_WORKERS, RUN_PARALLEL,
          solver_fun, CHECK=False, VIDEO=False, beta_exact=None, BATCH=False,
-         IDX_TIME_PLOT=-1):
+         IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True):
     
     if BATCH:
-        aux.warning('BATCH mode selected, turning off both CHECK and VIDEO flags...')
+        aux.warning('BATCH mode selected, turning off all plot flags...')
         CHECK = False
         VIDEO = False
+        PLOT = False
     
     # INPUT CHECKS
     exp_data = aux.check_file_or_data_input(exp_data, 'exp_data')
@@ -117,6 +119,21 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     x_exp = jnp.asarray(exp_data['x'])
     t_exp = jnp.asarray(exp_data['t'])
     sol_exp = jnp.asarray(exp_data['solution'])
+    
+    if SAVE_EXP:
+        # save experimental data to file using the same format as solution data
+        # (for reproducibility)
+        exp_out_file = h5py.File(out_dir/'experiments.h5', 'w')
+        tmp_set = exp_out_file.create_dataset(name='solution', data=sol_exp, **comprex_opts)
+        tmp_set.attrs['description'] = ('The i-th row contains all the experimental data at the i-th time instant, '
+                                        'each column is a different probe')
+        tmp_set = exp_out_file.create_dataset(name='x', data=x_exp, **comprex_opts)
+        tmp_set.attrs['description'] = 'Probes coordinates'
+        tmp_set = exp_out_file.create_dataset(name='t', data=t_exp, **comprex_opts)
+        tmp_set.attrs['description'] = 'Time instants acquired in the experiment'
+        # write to disk without closing the file
+        print(f'Writing experimental data to \n\t{Path(exp_out_file.filename).resolve()}')
+        exp_out_file.close()
     
     # check that experimental data and simulation data start and end at the same
     # time instant (or that, at least, the simulation is longer than the experiment)
@@ -190,35 +207,10 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     
     #%% CHECK: DO THE OBSERVED DATA LIE WITHIN +/- 2*SIGMA?
     
-    # for each space-time point, calculate the sample mean of the N_sampling_prior
-    # solutions (1st index: space, 2nd index: time, 3rd index: sampling)
-    mean_u = jnp.mean(solution_corrected, axis=2)
-    sigma_u = jnp.std(solution_corrected, axis=2)
-    u_upper = mean_u + 2*sigma_u
-    u_lower = mean_u - 2*sigma_u
-    
-    if CHECK:
-        # re-interpolate experimental data over simulation time grid
-        u_probe_interp = lambda u_probe: jnp.interp(t_mesh, t_exp, u_probe)
-        sol_exp_interp_t = jax.vmap(u_probe_interp, in_axes=1, out_axes=1)(sol_exp)
-        # data are stored as [t^k, u_1^k, ..., u_N^k] => create a column vector of
-        # column vectors => flatten the 2D array in column-major order (Fortran-like)
-        sol_exp_t = jnp.ravel(sol_exp_interp_t.T)
-        
-        fig = plt.figure()
-        plt.plot(x_mesh, mean_u[IDX_TIME_PLOT,:], label='Mean $u$')
-        plt.fill_between(x_mesh, u_upper[IDX_TIME_PLOT,:], u_lower[IDX_TIME_PLOT,:], 
-                         alpha=0.3, color='r')
-        plt.plot(x_mesh, u_upper[IDX_TIME_PLOT,:], color='r')
-        plt.plot(x_mesh, u_lower[IDX_TIME_PLOT,:], color='r')
-        plt.plot(x_exp, sol_exp_interp_t[IDX_TIME_PLOT], '*', label='Experiment')
-        plt.xlabel('$x$ [-]')
-        plt.ylabel('$u$ [-]')
-        plt.autoscale(enable=True, axis='x', tight=True)
-        plt.legend()
-        plt.title(fr'Mean solution with $\pm 2\sigma$ at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
-        plt.show(block=False)
-        aux.save_fig(fig, 'mean_prior_sigma', out_dir)
+    post.check_experiments_in_sigma_band(solution_corrected, sol_exp, x_mesh, 
+                                         t_mesh, x_exp, t_exp, N_sigma=2, 
+                                         t_plot=t_exp[IDX_TIME_PLOT], 
+                                         fig_file=out_dir/'meanSigmaExpPrior', PLOT=PLOT)
     
     
     #%% FIND MAXIMUM-A-POSTERIORI BETA/THETA
@@ -293,49 +285,10 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     
     
     if CHECK and beta_exact is not None:
-        # interpolate exact beta at required time instant...
-        beta_interp_t = jax.vmap(lambda beta_ex: jnp.interp(t_mesh, beta_exact['t'], beta_ex), 
-                                 in_axes=1, out_axes=1
-                                 )(beta_exact['beta'])
-        # and re-interpolate it over the actual mesh
-        beta_interp_xt = jax.vmap(lambda beta_t: jnp.interp(x_mesh, beta_exact['x'], beta_t), 
-                                  in_axes=0, out_axes=0
-                                  )(beta_interp_t)
-        
-        fig = plt.figure()
-        plt.plot(x_mesh, beta_r[:,IDX_TIME_PLOT], label=r'Calculated $\beta(x,t)$')
-        plt.plot(x_mesh, beta_interp_xt[IDX_TIME_PLOT,:], label=r'Exact $\beta(x,t, u, u_x)$')
-        plt.xlabel(r'$x$ [-]')
-        plt.ylabel(r'$\beta$ [-]')
-        plt.autoscale(enable=True, axis='x', tight=True)
-        plt.legend()
-        plt.title(fr'$\beta$ correction at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
-        plt.show(block=False)
-        aux.save_fig(fig, 'check_beta', out_dir)
-        
-        if VIDEO:
-            fig, ax = plt.subplots()
-            line_beta, = ax.plot(x_mesh, jnp.zeros_like(x_mesh), label=r'$\nu = \nu_0$')
-            ax.legend(loc='upper right')
-            ax.set_xlim(x_mesh[0], x_mesh[-1])
-            ax.set_ylim(0, 2)
-            # enable interactive mode
-            plt.ion()
-            plt.show(block=False)
-            for j in range(t_mesh.shape[0]):
-                # stop animation if the user closed the window
-                if not plt.fignum_exists(fig.number):
-                    break
-                line_beta.set_ydata(beta_r[:,j])
-                fig.canvas.draw_idle()
-                #fig.canvas.flush_events()
-                #plt.pause(0.0000001)
-                plt.pause(0.01)
-                ax.set_title(f'$t = {t_mesh[j]:.4f}$ s')
-            plt.ioff()
-            # show figure only if it hasn't been closed by the user
-            if plt.fignum_exists(fig.number):
-                plt.show()
+        post.compare_exact_beta(beta_r, beta_exact['beta'], 
+                                x_mesh, t_mesh, beta_exact['x'], beta_exact['t'], 
+                                t_plot=beta_exact['t'][-1], fig_file=out_dir/'checkBeta', 
+                                PLOT=PLOT, VIDEO=VIDEO)
     
     
     #%% CHECK MAP SOLUTION VS BASELINE
@@ -384,50 +337,93 @@ def main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior,
     
     #%% CHECK POSTERIOR DISTRIBUTION AROUND MAP POINT
     
-    # (1st index: space, 2nd index: time, 3rd index: sampling)
-    mean_u_post = jnp.mean(solution_posterior, axis=2)
-    sigma_u_post = jnp.std(solution_posterior, axis=2)
-    u_upper_post = mean_u_post + 2*sigma_u_post
-    u_lower_post = mean_u_post - 2*sigma_u_post
+    post.check_experiments_in_sigma_band(solution_posterior, sol_exp, x_mesh, 
+                                         t_mesh, x_exp, t_exp, N_sigma=2, 
+                                         t_plot=t_exp[IDX_TIME_PLOT], 
+                                         fig_file=out_dir/'meanSigmaExpPosterior', PLOT=PLOT)
     
-    if CHECK:
-        fig = plt.figure()
-        plt.plot(x_mesh, mean_u_post[IDX_TIME_PLOT,:], label='Mean $u$')
-        plt.fill_between(x_mesh, u_upper_post[IDX_TIME_PLOT,:], u_lower_post[IDX_TIME_PLOT,:], 
-                         alpha=0.3, color='r')
-        plt.plot(x_mesh, u_upper_post[IDX_TIME_PLOT,:], color='r')
-        plt.plot(x_mesh, u_lower_post[IDX_TIME_PLOT,:], color='r')
-        plt.plot(x_exp, sol_exp_interp_t[IDX_TIME_PLOT], '*', label='Experiment')
-        plt.xlabel('$x$ [-]')
-        plt.ylabel('$u$ [-]')
-        plt.autoscale(enable=True, axis='x', tight=True)
-        plt.legend()
-        plt.title(fr'Mean a-posteriori solution with $\pm 2\sigma$ at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
-        plt.show(block=False)
-        aux.save_fig(fig, 'mean_posterior_sigma', out_dir)
-        
-        fig = plt.figure()
-        plt.plot(x_mesh, mean_u[IDX_TIME_PLOT,:], label='Mean $u$ a priori', color='b')
-        plt.fill_between(x_mesh, u_upper[IDX_TIME_PLOT,:], u_lower[IDX_TIME_PLOT,:], 
-                         alpha=0.3, color='b')
-        plt.plot(x_mesh, u_upper[IDX_TIME_PLOT,:], color='b')
-        plt.plot(x_mesh, u_lower[IDX_TIME_PLOT,:], color='b')
-        plt.plot(x_mesh, mean_u_post[IDX_TIME_PLOT,:], label='Mean $u$ a posteriori', color='r')
-        plt.fill_between(x_mesh, u_upper_post[IDX_TIME_PLOT,:], u_lower_post[IDX_TIME_PLOT,:], 
-                         alpha=0.3, color='r')
-        plt.plot(x_mesh, u_upper_post[IDX_TIME_PLOT,:], color='r')
-        plt.plot(x_mesh, u_lower_post[IDX_TIME_PLOT,:], color='r')
-        plt.plot(x_exp, sol_exp_interp_t[IDX_TIME_PLOT], 'k*', label='Experiment')
-        plt.xlabel('$x$ [-]')
-        plt.ylabel('$u$ [-]')
-        plt.autoscale(enable=True, axis='x', tight=True)
-        plt.legend()
-        plt.title(fr'Mean with $\pm 2\sigma$ at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
-        plt.show(block=False)
-        #plt.show()
-        aux.save_fig(fig, 'prior_vs_posterior', out_dir)
+    post.compare_prior_posterior(solution_corrected, solution_posterior, sol_exp, 
+                                 x_mesh, t_mesh, x_exp, t_exp, N_sigma=2, 
+                                 t_plot=t_exp[IDX_TIME_PLOT], 
+                                 fig_file=out_dir/'priorVSposterior', PLOT=PLOT)
     
     
     #%% CLOSE HDF5 FILE
     
     out_file.close()
+    
+    # all figures are created with block=False to avoid blocking the execution
+    # => block the last one, so that the user can inspect them before closing 
+    # them and allowing the function to return
+    if PLOT:
+        aux.warning('Close all figures to finish the execution')
+        plt.show(block=True)
+
+
+def postprocessing(data_file, out_dir):
+    data_file = Path(data_file)
+    print(f'Reading data from \n\t{data_file.resolve()}')
+    # https://stackoverflow.com/a/41586571/17220538
+    with h5py.File(data_file, 'r') as file:
+        print('Available groups (left) and their datasets (right)')
+        for group_name, group in file.items():
+            print(group_name, list(group.keys()))
+        prior_data = file['prior']
+        posterior_data = file['posterior']
+    
+    post.check_experiments_in_sigma_band(prior_data['solution'], sol_exp, x_mesh, 
+                                         t_mesh, x_exp, t_exp, N_sigma=2, 
+                                         t_plot=t_exp[IDX_TIME_PLOT], 
+                                         fig_file=out_dir/'meanSigmaExp', PLOT=PLOT)
+        
+# =============================================================================
+#         # get first object name/key; may or may NOT be a group
+#         a_group_key = list(f.keys())[0]
+#     
+#         # get the object type for a_group_key: usually group or dataset
+#         print(type(f[a_group_key])) 
+#     
+#         # If a_group_key is a group name, 
+#         # this gets the object names in the group and returns as a list
+#         data = list(f[a_group_key])
+#     
+#         # If a_group_key is a dataset name, 
+#         # this gets the dataset values and returns as a list
+#         data = list(f[a_group_key])
+#         # preferred methods to get dataset values:
+#         ds_obj = f[a_group_key]      # returns as a h5py dataset object
+#         ds_arr = f[a_group_key][()]  # returns as a numpy array
+# 
+# 
+#     
+#     # for each space-time point, calculate the sample mean of the N_sampling_prior
+#     # solutions (1st index: space, 2nd index: time, 3rd index: sampling)
+#     mean_u = jnp.mean(solution_corrected, axis=2)
+#     sigma_u = jnp.std(solution_corrected, axis=2)
+#     u_upper = mean_u + 2*sigma_u
+#     u_lower = mean_u - 2*sigma_u
+#     
+#     if CHECK:
+#         # re-interpolate experimental data over simulation time grid
+#         u_probe_interp = lambda u_probe: jnp.interp(t_mesh, t_exp, u_probe)
+#         sol_exp_interp_t = jax.vmap(u_probe_interp, in_axes=1, out_axes=1)(sol_exp)
+#         # data are stored as [t^k, u_1^k, ..., u_N^k] => create a column vector of
+#         # column vectors => flatten the 2D array in column-major order (Fortran-like)
+#         sol_exp_t = jnp.ravel(sol_exp_interp_t.T)
+#         
+#         fig = plt.figure()
+#         plt.plot(x_mesh, mean_u[IDX_TIME_PLOT,:], label='Mean $u$')
+#         plt.fill_between(x_mesh, u_upper[IDX_TIME_PLOT,:], u_lower[IDX_TIME_PLOT,:], 
+#                          alpha=0.3, color='r')
+#         plt.plot(x_mesh, u_upper[IDX_TIME_PLOT,:], color='r')
+#         plt.plot(x_mesh, u_lower[IDX_TIME_PLOT,:], color='r')
+#         plt.plot(x_exp, sol_exp_interp_t[IDX_TIME_PLOT], '*', label='Experiment')
+#         plt.xlabel('$x$ [-]')
+#         plt.ylabel('$u$ [-]')
+#         plt.autoscale(enable=True, axis='x', tight=True)
+#         plt.legend()
+#         plt.title(fr'Mean solution with $\pm 2\sigma$ at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
+#         plt.show(block=False)
+#         aux.save_fig(fig, 'mean_prior_sigma', out_dir)
+# =============================================================================
+    

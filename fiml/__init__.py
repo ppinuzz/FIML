@@ -36,6 +36,7 @@ from . import auxiliaries
 from . import fiml
 from . import parallel
 from . import main
+from . import post
 
 
 __version__ = '0.0.1'

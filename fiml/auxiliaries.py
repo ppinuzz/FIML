@@ -31,6 +31,19 @@ def warning(message):
     print(Fore.YELLOW + message + Style.RESET_ALL)
 
 
+def check_msg(message):
+    """
+    Print bright cyan check message.
+
+    Parameters
+    ----------
+    message : str
+        User message.
+
+    """
+    print(Fore.CYAN + Style.BRIGHT + message + Style.RESET_ALL)
+
+
 def check_file_or_data_input(input_obj, paran_name):
     # https://stackoverflow.com/a/76362264/17220538
     if isinstance(input_obj, PathLike):
@@ -46,10 +59,10 @@ def check_file_or_data_input(input_obj, paran_name):
 
 def check_optimiser_results(opt, SCIPY=True):
     success = True
-    print(f'Cost function value at MAP point     : {opt.fun}\n'
-          f'Number of optimiser iterations       : {opt.nit}\n'
-          f'Number of cost function evaluations  : {opt.nfev}\n'
-          f'Number of Jacobian evaluations       : {opt.njev}')
+    check_msg(f'Cost function value at MAP point     : {opt.fun}\n'
+              f'Number of optimiser iterations       : {opt.nit}\n'
+              f'Number of cost function evaluations  : {opt.nfev}\n'
+              f'Number of Jacobian evaluations       : {opt.njev}')
     if not opt.success:
         success = False
         warning('Failed optimisation: the optimiser could not find the '
@@ -161,14 +174,17 @@ def save_fig(fig, fig_name, fig_dir):
 
 
 def sample_solution(solution, x_mesh=None, t_mesh=None, x_probes=None, t_probes=None):
-    if (x_mesh is None) != (x_probes is None):
-        sol_sampled = _sample_sol_space(solution, x_mesh, x_probes)
-    elif (t_mesh is None) != (t_probes is None):
-        sol_sampled = _sample_sol_time(solution, t_mesh, t_probes)
-    elif (x_mesh, x_probes, t_mesh, t_probes) != (None, None, None, None):
+    space_given = x_mesh is not None and x_probes is not None
+    time_given = t_mesh is not None and t_probes is not None
+    if space_given and time_given:
         sol_space = _sample_sol_space(solution, x_mesh, x_probes)
         sol_sampled = _sample_sol_time(sol_space, t_mesh, t_probes)
+    elif space_given:
+        sol_sampled = _sample_sol_space(solution, x_mesh, x_probes)
+    elif time_given:
+        sol_sampled = _sample_sol_time(solution, t_mesh, t_probes)
     else:
+        warning('Neither time nor space are fully provided (i.e. mesh values and sampling points), returning None...')
         sol_sampled = None
     return sol_sampled
 

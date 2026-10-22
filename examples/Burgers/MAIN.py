@@ -25,6 +25,8 @@ import fiml
 
 #%% USER INPUT
 
+POST_PROC = False
+ANALYSIS = False
 if len(sys.argv) > 1:
     # 0: filename
     # 1: flag
@@ -32,20 +34,40 @@ if len(sys.argv) > 1:
     j = 1
     while j < len(sys.argv):
         match sys.argv[j]:
-            case '--file' | '-f':
+            case '--input' | '-i':
                 # current argument is the flag => next is the filename
                 input_file = Path(os.getcwd()) / sys.argv[j+1]
                 # skip filename, so that next loop will read the next flag
                 j += 2
+                ANALYSIS = True
+                output_file = None
+            case '--post' | '-p':
+                # current argument is the flag => next is the filename
+                output_file = Path(os.getcwd()) / sys.argv[j+1]
+                # skip filename, so that next loop will read the next flag
+                j += 2
+                POST_PROC = False
+                input_file = None
             case '--help' | '-h':
                 print('Possible flags: \n'
-                      '\t --file: prescribe YAML input file \n'
+                      '\t --input, -i: prescribe YAML input file \n'
+                      '\t --post, -p: prescribe YAML postprocessing file \n'
                       '\t --help: print this help')
                 quit()
             case _:
                 raise ValueError('Unknown CLI input')
 else:
-    input_file = Path('test.yaml')
+    # interactive execution from Spyder
+    ANALYSIS = True
+    POST_PROC = False
+    if ANALYSIS:
+        input_file = Path('test_input.yaml')
+        #output_file = Path('test_postproc.yaml')
+        output_file = None
+    if POST_PROC:
+        input_file = None
+        output_file = Path('Burgers_post.yaml')
+
 
 if input_file is None:
     exact_sol_file = Path('solution/variable_nu.npz')
@@ -85,13 +107,20 @@ else:
     N_sampling_post = int(input_data['num_samples_posterior'])
     sigma2_obs = float(input_data['variance_observational'])
     
-    SEED = int(input_data['seed'])
+    SEED = input_data['seed']
     RUN_PARALLEL = input_data['run_parallel']
     N_WORKERS = int(input_data['parallel_workers'])
     CHECK = input_data['check_outputs']
     VIDEO = input_data['show_videos']
     BATCH = input_data['batch_mode']
 
+
+if output_file is not None:
+    with open(output_file, 'r') as file:
+        output_data = yaml.safe_load(file)
+    data_file_out = Path(output_data['data_file'])
+    
+    post_dir = Path(output_data['output_dir'])
 
 
 #%% ------------------ DO NOT TOUCH ANYTHING BELOW THIS LINE ------------------
@@ -112,7 +141,10 @@ BC = {'u0': cfg['u0'],
 
 
 if __name__ == '__main__':
-    fiml.main.main(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t,
-                   sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,
-                   N_WORKERS, RUN_PARALLEL, solve_Burgers, CHECK, VIDEO,
-                   beta_exact, BATCH, IDX_TIME_PLOT=-1)
+    if POST_PROC:
+        fiml.main.postprocessing(data_file_out, post_dir)
+    if ANALYSIS:
+        fiml.main.analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t,
+                       sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,
+                       N_WORKERS, RUN_PARALLEL, solve_Burgers, CHECK, VIDEO,
+                       beta_exact, BATCH, IDX_TIME_PLOT=-1)

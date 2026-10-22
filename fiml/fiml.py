@@ -158,7 +158,7 @@ def remove_failed_runs(run_data, converged):
             # ellipsis (...) is the same as ':' for all previous dimensions
             data = data[..., converged]
             clean_data.append(data)
-        print(f'Number of samples modified from {N_runs} (user input) to {sum(converged)} (non-failed simulations)...')
+        aux.warning(f'Number of samples modified from {N_runs} (user input) to {sum(converged)} (non-failed simulations)...')
     else:
         clean_data = run_data
     # unpack the list: specify they're part of the same 1-element return tuple
@@ -207,7 +207,7 @@ def compare_baseline_MAP_solutions(sol_MAP, theta_baseline, solver_wrap,
     err_report.field_names = ['Metric', 'Baseline', 'MAP']
     err_report.add_row(['Avg. MAE [EU]', f'{MAE_baseline:.3e}', f'{MAE_MAP:.3e}'])
     err_report.add_row(['Avg. RMSE [EU]', f'{RMSE_baseline:.3e}', f'{RMSE_MAP:.3e}'])
-    print(err_report)
+    aux.check_msg(err_report.get_string())
     
     # delta > 0: improvement w.r.t. baseline model
     delta_MAE = MAE_baseline - MAE_MAP
@@ -217,7 +217,7 @@ def compare_baseline_MAP_solutions(sol_MAP, theta_baseline, solver_wrap,
     avg_delta_MAE = jnp.mean(jnp.abs(delta_MAE))
     avg_delta_RMSE = jnp.mean(jnp.abs(delta_RMSE))
     
-    print('How to read the table: MAP solution outperforms the baseline solution '
+    aux.check_msg('How to read the table: MAP solution outperforms the baseline solution '
           '(according to ... metric) in ...% of the time-space domain, with an average '
           'metric improvement of ...')
     improv_report = PrettyTable()
@@ -225,7 +225,7 @@ def compare_baseline_MAP_solutions(sol_MAP, theta_baseline, solver_wrap,
     improv_report.field_names = ['Metric', '% of space-time domain', 'Average outperform']
     improv_report.add_row(['MAE', f'{100*N_delta_MAE:.2f}', f'{avg_delta_MAE:.3e}'])
     improv_report.add_row(['RMSE', f'{100*N_delta_RMSE:.2f}', f'{avg_delta_RMSE:.3e}'])
-    print(improv_report)
+    aux.check_msg(improv_report.get_string())
     
     if PLOT:
         fig = plt.imshow(jnp.abs(err_baseline)-jnp.abs(err_MAP), cmap='hot')
