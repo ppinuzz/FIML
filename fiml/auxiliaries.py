@@ -6,6 +6,7 @@ Auxiliary functions.
 """
 
 import numpy as np
+import jax.random as jrn
 from os import PathLike
 from pathlib import Path
 import jax
@@ -220,3 +221,15 @@ def _sample_sol_time(u, t_mesh, t_probes):
     # apply it to all time instants
     u_interp = jax.vmap(interpolate, in_axes=1, out_axes=1)(u)
     return u_interp
+
+
+def generate_key(seed):
+    if seed is None:
+        # JAX doesn't support None as seed value => create a random integer 
+        # using NumPy, then pass it to JAX
+        # (use the max value storable in a float64)
+        seed_new = np.random.default_rng(seed).integers(low=np.iinfo(np.int64).max)
+    else:
+        seed_new = seed
+    key_random = jrn.key(seed_new)
+    return key_random

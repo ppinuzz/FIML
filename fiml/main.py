@@ -178,7 +178,7 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     # beta = 1 + sum_mq theta_mq Bm(x) Bq(t)
     # beta_prior = 1 (no correction) means theta_prior = 0
     theta_prior = np.zeros(shape=(N_theta, ))
-    key_random = jrn.key(SEED)
+    key_random = aux.generate_key(SEED)
     # each column of the matrix is one draw of the theta vector, which contains
     # the N_theta parameters of the beta(x,t) function
     print(f'Drawing {N_sampling_prior} samples of the {N_theta}-components theta vector...')
@@ -315,7 +315,7 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     #%% EVALUATE A-POSTERIORI DISTRIBUTION
     
     print(f'Drawing {N_sampling_post} samples of the {N_theta}-components theta vector a-posteriori...')
-    key_random = jrn.key(SEED)
+    key_random = aux.generate_key(SEED)
     theta_post_samples = fiml.posterior_sampling(theta_MAP, C_theta_MAP, N_sampling_post, key_random)
     
     solution_posterior, max_res_posterior, success_posterior = fiml.launch_sampling(theta_post_samples, run_solver_case, solver_fun, N_x, N_t, 
