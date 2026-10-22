@@ -192,8 +192,11 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
                     N_sampling_prior, (N_basis_x, N_basis_t, B_x, B_x_interf, 
                     B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
     
+    beta_corrected = jax.vmap(lambda theta: fiml.beta(theta, B_x, B_t, NO_NEG=True),
+                              in_axes=1, out_axes=2)(theta_prior_samples)
     aux.save_sampling(out_file, 'prior', comprex_opts, theta_prior_samples, 
-                      solution_corrected, max_res_corrected, success_corrected)
+                      solution_corrected, max_res_corrected, success_corrected,
+                      beta_corrected)
     
     solution_corrected, max_res_corrected = fiml.handle_failed_runs(
                                                 (solution_corrected, max_res_corrected), 
@@ -278,9 +281,10 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     aux.check_optimiser_results(opt)
     
     theta_MAP = opt.x
-    _, sol_MAP, max_res_MAP, success_MAP = run_solver_case(None, theta_MAP, solver_fun, N_basis_x, N_basis_t, 
-                                B_x, B_x_interf, B_t, nu, x_mesh, t_mesh,
-                                u_IC, u0, uL, out_dir=None)
+    _, sol_MAP, max_res_MAP, success_MAP = run_solver_case(None, theta_MAP, solver_fun, 
+                                            N_basis_x, N_basis_t, 
+                                            B_x, B_x_interf, B_t, nu, x_mesh, t_mesh,
+                                            u_IC, u0, uL, out_dir=None)
     beta_r = fiml.beta(theta_MAP, B_x, B_t, NO_NEG=True)
     
     
@@ -322,8 +326,11 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
                     N_sampling_post, (N_basis_x, N_basis_t, B_x, B_x_interf, 
                     B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
     
+    beta_posterior = jax.vmap(lambda theta: fiml.beta(theta, B_x, B_t, NO_NEG=True),
+                              in_axes=1, out_axes=2)(theta_post_samples)
     aux.save_sampling(out_file, 'posterior', comprex_opts, theta_post_samples, 
-                      solution_posterior, max_res_posterior, success_posterior)
+                      solution_posterior, max_res_posterior, success_posterior,
+                      beta_posterior)
     
     solution_posterior, max_res_posterior = fiml.handle_failed_runs(
                                                 (solution_posterior, max_res_posterior), 

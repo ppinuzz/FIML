@@ -141,7 +141,7 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
         plt.title(fr'Error on $\beta$ at $t = {t_beta[idx_plot_beta]:.5f}$ s')
         plt.show(block=False)
         if fig_file is not None:
-            aux.save_fig(fig, '{fig_file.name}_error', fig_file.parent)
+            aux.save_fig(fig, f'{fig_file.name}_error', fig_file.parent)
     
     if VIDEO:
         fig, ax = plt.subplots()

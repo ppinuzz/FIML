@@ -190,7 +190,7 @@ def sample_solution(solution, x_mesh=None, t_mesh=None, x_probes=None, t_probes=
     return sol_sampled
 
 
-def save_sampling(hdf5_file, group_name, opts, theta, sol, res, success):
+def save_sampling(hdf5_file, group_name, opts, theta, sol, res, success, beta):
     hdf5_group = hdf5_file.create_group(group_name)
     tmp_set = hdf5_group.create_dataset(name='theta', data=theta, **opts)
     tmp_set.attrs['description'] = ('Each column is one drow and theta contains the '
@@ -203,6 +203,9 @@ def save_sampling(hdf5_file, group_name, opts, theta, sol, res, success):
     tmp_set.attrs['description'] = ('The i-th row contains the maximum residual for the i-th time instant')
     tmp_set = hdf5_group.create_dataset(name='success', data=success, **opts)
     tmp_set.attrs['description'] = ('If False, the k-th simulation did not converge or crashed')
+    tmp_set = hdf5_group.create_dataset(name='beta', data=beta, **opts)
+    tmp_set.attrs['description'] = ('Correction beta(x,y) with dimensione (Nx, Nt), '
+                                    'transpoded ordering w.r.t. solution variable')
     # write to disk without closing the file
     print(f'Writing data to \n\t{Path(hdf5_file.filename).resolve()}')
     hdf5_file.flush()
