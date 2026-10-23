@@ -16,11 +16,12 @@ jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from pathlib import Path
-import inspect
 from timeit import default_timer as timer
 from datetime import timedelta
+import inspect
 import sys
 import cloudpickle
+import h5py
 import burgers
 # setup files directory
 setup_dir = Path(r'./problem_setup')
@@ -38,23 +39,32 @@ SOLVE = False
 EXTRACT_PROBES = False
 
 # setup files
-import problem_setup.BChom_ICsin_nu_xt as cfg
+#import problem_setup.BChom_ICsin_nu_xt as cfg
 #import problem_setup.BChom_ICsin_nu_xuux as cfg
+import problem_setup.BChom_ICsin_nu_u as cfg
 
 
 #%% ------------------ DO NOT TOUCH ANYTHING BELOW THIS LINE ------------------
 
-out_dir = Path('solution_Burgers')
+out_dir = Path('solution_Burgers') / Path(cfg.__file__).stem
+sol_file = out_dir / 'solution.h5'
+probes_file = out_dir / 'probes.h5'
+
+out_dir.mkdir(exist_ok=True, parents=True)
+
+# common compression options
+# shuffle: allows blocks to be moved around, possible memory gain
+# gzip: most portable and fairly fast
+# compression_opts: for GZIP, it's the compressione level (9: maximum)
+comprex_opts = {'shuffle': True, 'compression': 'gzip', 'compression_opts': 9}
+
+
 sol_file_basic = out_dir / 'basic.npz'
 sol_file_var_nu = out_dir / 'variable_nu.npz'
 beta_file = out_dir / 'beta.npz'
-
-probes_file_basic = out_dir / 'basic.npz'
-probes_file_var_nu = out_dir / 'variable_nu.npz'
-
+probes_file_basic = out_dir / 'probes_basic.npz'
+probes_file_var_nu = out_dir / 'probes_variable_nu.npz'
 cfg_file = out_dir / Path('settings.npz')
-
-out_dir.mkdir(exist_ok=True)
 
 
 #%% SET CONTROL FLOW FLAGS
@@ -65,6 +75,9 @@ if len(sys.argv) > 1:
             case '--solve' | '-s':
                 SOLVE = True
             case '--probes' | '-p':
+                EXTRACT_PROBES = True
+            case '-sp' | '-ps':
+                SOLVE = True
                 EXTRACT_PROBES = True
             case '--video' | '-v':
                 VIDEO = True
@@ -121,7 +134,9 @@ if SOLVE:
                         u_IC=cloudpickle.dumps(cfg.u_IC), max_res=max_res_basic, 
                         solution=sol_basic, description=header)
     
+    
     #%% VARIABLE VISCOSITY BURGERS' EQUATION
+    
     start_time = timer()
     sol_var_nu, max_res_var_nu = burgers.solve_Burgers(sol_var_nu, x_mesh, t_mesh, nu=cfg.nu)
     end_time = timer()
@@ -166,18 +181,88 @@ if SOLVE:
                      nu_exact=cloudpickle.dumps(cfg.nu), 
                      nu_approx=cloudpickle.dumps(cfg.nu0_fun), 
                      beta=beta_eval)
+    
+    #%% SAVE DATA
+    
+    # common compression options
+    # shuffle: allows blocks to be moved around, possible memory gain
+    # gzip: most portable and fairly fast
+    # compression_opts: for GZIP, it's the compressione level (9: maximum)
+    comprex_opts = {'shuffle': True, 'compression': 'gzip', 'compression_opts': 9}
+    print(f'Writing solution to \n\t{sol_file.resolve()}')
+    with h5py.File(sol_file, 'w') as file:
+        hdf5_mesh = file.create_group('mesh')
+        tmp_set = hdf5_mesh.create_dataset(name='x', data=x_mesh, **comprex_opts)
+        tmp_set.attrs['description'] = 'Spatial mesh'
+        tmp_set = hdf5_mesh.create_dataset(name='t', data=t_mesh, **comprex_opts)
+        tmp_set.attrs['description'] = 'Time mesh'
+        
+        hdf5_cfg = file.create_group('settings')
+        # cannot pass compression options when storing scalar values
+        tmp_set = hdf5_cfg.create_dataset(name='L', data=cfg.L)
+        tmp_set.attrs['description'] = 'Domain length'
+        tmp_set = hdf5_cfg.create_dataset(name='T', data=cfg.T)
+        tmp_set.attrs['description'] = 'Interval duration'
+        tmp_set = hdf5_cfg.create_dataset(name='u0', data=cfg.u0)
+        tmp_set.attrs['description'] = 'Dirichlet boundary condition u(0,t)'
+        tmp_set = hdf5_cfg.create_dataset(name='uL', data=cfg.uL)
+        tmp_set.attrs['description'] = 'Dirichlet boundary condition u(L,t)'
+        #tmp_set = hdf5_cfg.create_dataset(name='u_IC', data=cloudpickle.dumps(cfg.u_IC))
+        tmp_set = hdf5_cfg.create_dataset(name='u_IC',
+                                          data=jnp.frombuffer(cloudpickle.dumps(cfg.u_IC), dtype=jnp.uint8))
+        tmp_set.attrs['description'] = 'Initial condition u(x,0)'
+        
+        hdf5_basic = file.create_group('baseline')
+        tmp_set = hdf5_basic.create_dataset(name='solution', data=sol_basic, **comprex_opts)
+        tmp_set.attrs['description'] = ('Solution of Burgers eq. with baseline constant '
+                                        ' viscosity, k-th row is the full solution at '
+                                        'time instant t_k')
+        tmp_set = hdf5_basic.create_dataset(name='max_res', data=max_res_basic, **comprex_opts)
+        tmp_set.attrs['description'] = 'The k-th row contains the maximum residual for the k-th time instant'
+        #tmp_set = hdf5_basic.create_dataset(name='nu', data=cloudpickle.dumps(cfg.nu0_fun))
+        tmp_set = hdf5_basic.create_dataset(name='nu',
+                                            data=jnp.frombuffer(cloudpickle.dumps(cfg.nu0_fun), dtype=jnp.uint8))
+        
+        tmp_set.attrs['description'] = 'Constant viscosity function nu0(x, t, u, ux, uxx)'
+        
+        hdf5_exact = file.create_group('exact')
+        tmp_set = hdf5_exact.create_dataset(name='solution', data=sol_var_nu, **comprex_opts)
+        tmp_set.attrs['description'] = ('Solution of Burgers eq. with variable viscosity, '
+                                        'k-th row is the full solution at time instant t_k')
+        tmp_set = hdf5_exact.create_dataset(name='max_res', data=max_res_var_nu, **comprex_opts)
+        tmp_set.attrs['description'] = 'The k-th row contains the maximum residual for the k-th time instant'
+        tmp_set = hdf5_exact.create_dataset(name='nu',
+                                            data=jnp.frombuffer(cloudpickle.dumps(cfg.nu), dtype=jnp.uint8))
+        tmp_set.attrs['description'] = 'Exact viscosity function nu(x, t, u, ux, uxx)'
+        
+        hdf5_beta = file.create_group('beta')
+        tmp_set = hdf5_beta.create_dataset(name='beta', data=beta_eval, **comprex_opts)
+        tmp_set.attrs['description'] = 'Beta correction beta = nu_exact / nu_baseline'
+        tmp_set = hdf5_beta.create_dataset(name='ux', data=ux, **comprex_opts)
+        tmp_set.attrs['description'] = 'Derivative du/dx'
 else:
-    data_basic = jnp.load(sol_file_basic)
-    t_mesh = data_basic['t']
-    x_mesh = data_basic['x']
-    max_res_basic = data_basic['max_res']
-    sol_basic = data_basic['solution']
-    data_var_nu = jnp.load(sol_file_var_nu)
-    # HACK: assuming same time and space mesh
-    max_res_var_nu = data_var_nu['max_res']
-    sol_var_nu = data_var_nu['solution']
-    data_beta = jnp.load(beta_file)
-    beta_eval = data_beta['beta']
+    with h5py.File(sol_file, 'r') as file:
+        t_mesh = jnp.asarray(file['mesh']['t'])
+        x_mesh = jnp.asarray(file['mesh']['x'])
+        max_res_basic = jnp.asarray(file['baseline']['max_res'])
+        sol_basic = jnp.asarray(file['baseline']['solution'])
+        max_res_var_nu = jnp.asarray(file['exact']['max_res'])
+        sol_var_nu = jnp.asarray(file['exact']['solution'])
+        beta_eval = jnp.asarray(file['beta']['beta'])
+# =============================================================================
+#     data_var_nu = jnp.load(sol_file_var_nu)
+#     data_basic = jnp.load(sol_file_basic)
+#     t_mesh = data_basic['t']
+#     x_mesh = data_basic['x']
+#     max_res_basic = data_basic['max_res']
+#     sol_basic = data_basic['solution']
+#     data_var_nu = jnp.load(sol_file_var_nu)
+#     # HACK: assuming same time and space mesh
+#     max_res_var_nu = data_var_nu['max_res']
+#     sol_var_nu = data_var_nu['solution']
+#     data_beta = jnp.load(beta_file)
+#     beta_eval = data_beta['beta']
+# =============================================================================
 
 
 #%% EXTRACT "PROBES DATA"
@@ -189,6 +274,21 @@ if EXTRACT_PROBES:
         sol_probes_basic = sol_probes_basic.at[j,:].set(jnp.interp(cfg.x_probes, x_mesh, sol_basic[j,:]))
         sol_probes_var_nu = sol_probes_var_nu.at[j,:].set(jnp.interp(cfg.x_probes, x_mesh, sol_var_nu[j,:]))
     
+    print(f'Saving sampled basic solution to \n\t{probes_file.resolve()}')
+    with h5py.File(probes_file, 'w') as file:
+        hdf5_probes = file.create_group('probes')
+        tmp_set = hdf5_probes.create_dataset(name='x', data=cfg.x_probes, **comprex_opts)
+        tmp_set.attrs['description'] = 'Probe locations'
+        tmp_set = hdf5_probes.create_dataset(name='t', data=t_mesh, **comprex_opts)
+        tmp_set.attrs['description'] = 'Acquisition time instants'
+        
+        hdf5_basic = file.create_group('baseline')
+        tmp_set = hdf5_basic.create_dataset(name='solution', data=sol_probes_basic, **comprex_opts)
+        tmp_set.attrs['description'] = 'Sampled solution of baseline problem'
+        
+        hdf5_var_nu = file.create_group('exact')
+        tmp_set = hdf5_var_nu.create_dataset(name='solution', data=sol_probes_var_nu, **comprex_opts)
+        tmp_set.attrs['description'] = 'Sampled solution of exact problem'
     print(f'Saving sampled basic solution to \n\t{probes_file_basic.resolve()}')
     header_probes = ', '.join([f'{cfg.x_probes[i]}' for i in range(0, cfg.N_probes)])
     header = ('Solution of Burgers equation with constant viscosity sampled along the axis\n'
@@ -213,6 +313,7 @@ if EXTRACT_PROBES:
 
 if SOLVE:
     print('!! CLOSE ALL FIGURES TO TERMINATE EXECUTION !!')
+    
     plt.figure()
     plt.plot(x_mesh, cfg.u_IC(x_mesh), label='$u(x,0)$')
     plt.plot(x_mesh, sol_basic[-1,:], label=r'$u$ with $\nu = \nu_0$')
