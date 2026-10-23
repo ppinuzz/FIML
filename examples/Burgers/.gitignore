@@ -6,3 +6,5 @@
 
 # dump script to test snippets
 DUMP.py
+
+_not_used/**
