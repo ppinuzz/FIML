@@ -252,4 +252,45 @@ def compare_prior_posterior(prior, posterior, exp, x, t, x_exp, t_exp, ax_sol=2,
         plt.show(block=False)
         if fig_file is not None:
             aux.save_fig(fig, fig_file.name, fig_file.parent)
-    
+
+
+def check_parametrisation_fitness(beta, B_x, B_t, BETA_MIN=1e-2):
+    # beta = F(Bx^T * Theta * Bt), where
+    #   F(z) = BETA_MIN + (1 - BETA_MIN)/ln(2) * softplus(z)
+    #   z = Bx^T * Theta * Bt
+    # the unknown is Theta (Bx and Bt are fixed) => invert F(z) to obtain Theta
+    w = (beta - BETA_MIN) * jnp.log(2) / (1 - BETA_MIN)
+    z_exact = jnp.log(jnp.expm1(w))
+
+    # least squares problem: 35 unknowns Theta_ij and NxNt data available
+    #   z_exact = Bx^T * Theta * Bt
+    # written using the pseudoinverse (?) as
+    #   Bx * z_exact * Bt^T = (BxBx^T) * Theta * (BtBt^T)
+    # split into 2 equations:
+    #   1) (BxBx^T) * W = Bx * z_exact * Bt^T   => solve for W
+    #   2) X = Theta * (BtBt^T), rewritten as 
+    #       (BtBt^T)^T Theta^T = W^T
+    #       BtBt^T Theta^T = W^T
+    Bxx = B_x @ B_x.T
+    Btt = B_t @ B_t.T
+    W = jnp.linalg.solve(Bxx, B_x @ z_exact @ B_t.T)
+    Theta = jnp.linalg.solve(Btt, W.T).T
+
+    # calculate the min-square beta
+    z_least_squares = B_x.T @ Theta @ B_t
+    beta_fit = BETA_MIN + (1 - BETA_MIN) * jnp.logaddexp(0, z_least_squares) / jnp.log(2)
+
+    err_beta = beta_fit - beta
+    # global relative L2 error
+    err_rel_L2 = jnp.linalg.norm(err_beta) / jnp.linalg.norm(beta)
+    # pointwise relative error
+    rel_err_beta = err_beta / beta
+    # average absolute pointwise relative error
+    avg_rel_err = jnp.mean(jnp.abs(rel_err_beta))
+
+    aux.check_msg(f'Global relative L2 beta error       : {100*err_rel_L2:.2f}%')
+    aux.check_msg(f'Max positive relative beta error    : {100*jnp.max(rel_err_beta):.2f}%')
+    aux.check_msg(f'Max negative relative beta error    : {100*jnp.min(rel_err_beta):.2f}%')
+    aux.check_msg(f'Max absolute relative beta error    : '
+                  f'{100*jnp.max(jnp.abs(rel_err_beta)):.2f}%')
+    aux.check_msg(f'Mean absolute relative beta error   : {100*avg_rel_err:.2f}%')
