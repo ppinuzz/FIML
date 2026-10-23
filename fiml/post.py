@@ -16,6 +16,7 @@ from pathlib import Path
 def check_experiments_in_sigma_band(sol, exp, x, t, x_exp, t_exp, ax_sol=2, 
                                     N_sigma=2, t_plot=None, fig_file=None, 
                                     PLOT=True, VIDEO=False):
+    sol = jnp.asarray(sol)
     # for each space-time point, calculate the sample mean of the solutions
     # obtained solving the equation for each sample
     # (1st index: space, 2nd index: time, 3rd index: sampling)
@@ -84,6 +85,12 @@ def check_experiments_in_sigma_band(sol, exp, x, t, x_exp, t_exp, ax_sol=2,
 def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta, 
                        t_plot=None, fig_file=None, PLOT=True, VIDEO=False):
     
+    beta_num = jnp.asarray(beta_num)
+    beta_exact = jnp.asarray(beta_exact)
+    x = jnp.asarray(x)
+    t = jnp.asarray(t)
+    x_beta = jnp.asarray(x_beta)
+    t_beta = jnp.asarray(t_beta)
     # if no time instant to plot is given, the last one is assumed
     # (where discrepancy is likely to be the biggest)
     if t_plot is None:
@@ -102,28 +109,30 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
     
     # beta originally is transposed because of how it's formulated as a matrix
     # product (i.e. Nx x Nt, not Nt x Nx like the solution matrix)
-    if beta_num.shape == (x.size, t.size):
-        beta_num = beta_num.T
+    # (average as beta_num is a 2D space-time field for each sample => 3D array)
+    beta_num_mean = jnp.mean(beta_num, axis=2)
+    if beta_num_mean.shape == (x.size, t.size):
+        beta_num_mean = beta_num_mean.T
     if beta_exact.shape == (x_beta.size, t_beta.size):
         beta_exact = beta_exact.T
     
     # numerical beta (from solver) reinterpolated over the space-time grid
     # of the exact beta (to avoid distorting the exact beta)
-    beta_xt = aux.sample_solution(beta_num, x_mesh=x, x_probes=x_beta, t_mesh=t, t_probes=t_beta)
+    beta_xt = aux.sample_solution(beta_num_mean, x_mesh=x, x_probes=x_beta, t_mesh=t, t_probes=t_beta)
     
     err_beta = (beta_xt - beta_exact) / beta_exact
     # average of the relative errors, in modulus
     MAE_err_t = jnp.mean(jnp.abs(err_beta[idx_plot_beta]))
     aux.check_msg(f'At t = {t_beta_plot:.5f}:\n'
-                  f'\tAverage of the relative errors, in modulus: {MAE_err_t:.2f}%\n'
-                  f'\tMaximum error: {jnp.max(err_beta[idx_plot_beta]):.2f}%\n'
-                  f'\tMinimum error: {jnp.min(err_beta[idx_plot_beta]):.2f}%')
+                  f'\tAverage of the relative errors, in modulus: {100*MAE_err_t:.2f}%\n'
+                  f'\tMaximum error: {100*jnp.max(err_beta[idx_plot_beta]):.2f}%\n'
+                  f'\tMinimum error: {100*jnp.min(err_beta[idx_plot_beta]):.2f}%')
     
     
     if PLOT:
         fig = plt.figure()
-        plt.plot(x, beta_xt[idx_plot_beta,:], label=r'Calculated $\beta$')
-        plt.plot(x, beta_exact[idx_plot_beta,:], label=r'Exact $\beta$')
+        plt.plot(x_beta, beta_xt[idx_plot_beta,:], label=r'Calculated $\beta$')
+        plt.plot(x_beta, beta_exact[idx_plot_beta,:], label=r'Exact $\beta$')
         plt.xlabel(r'$x$ [-]')
         plt.ylabel(r'$\beta$ [-]')
         plt.autoscale(enable=True, axis='x', tight=True)
@@ -134,7 +143,7 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
             aux.save_fig(fig, fig_file.name, fig_file.parent)
         
         fig = plt.figure()
-        plt.plot(x, err_beta[idx_plot_beta,:])
+        plt.plot(x_beta, 100*err_beta[idx_plot_beta,:])
         plt.xlabel(r'$x$ [-]')
         plt.ylabel(r'$(\beta - \beta_\mathrm{ex})/\beta_\mathrm{ex}$ [\%]')
         plt.autoscale(enable=True, axis='x', tight=True)

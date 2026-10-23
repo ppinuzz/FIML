@@ -7,6 +7,7 @@ Main functions of FIML methodology.
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
+from os import PathLike
 
 import jax
 # use float64, rather than float32
@@ -357,7 +358,9 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     
     #%% CLOSE HDF5 FILE
     
+    print(f'HDF5 groups: {list(out_file.keys())}')
     out_file.close()
+    
     
     # all figures are created with block=False to avoid blocking the execution
     # => block the last one, so that the user can inspect them before closing 
@@ -367,22 +370,48 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
         plt.show(block=True)
 
 
-def postprocessing(data_file, out_dir):
-    data_file = Path(data_file)
-    print(f'Reading data from \n\t{data_file.resolve()}')
+def postprocessing(sol_file, exp_file, out_dir, beta_exact=None):
+    sol_file = Path(sol_file)
+    print(f'Reading numerical solution from \n\t{sol_file.resolve()}')
     # https://stackoverflow.com/a/41586571/17220538
-    with h5py.File(data_file, 'r') as file:
-        print('Available groups (left) and their datasets (right)')
-        for group_name, group in file.items():
-            print(group_name, list(group.keys()))
-        prior_data = file['prior']
-        posterior_data = file['posterior']
+    sol_file_ptr = h5py.File(sol_file, 'r')
+    print('Available groups (left) and their datasets (right): ')
+    for group_name, group in sol_file_ptr.items():
+        print('\t', group_name, list(group.keys()))
+    prior_data = sol_file_ptr['prior']
+    posterior_data = sol_file_ptr['posterior']
+    mesh = sol_file_ptr['mesh']
     
-    post.check_experiments_in_sigma_band(prior_data['solution'], sol_exp, x_mesh, 
-                                         t_mesh, x_exp, t_exp, N_sigma=2, 
-                                         t_plot=t_exp[IDX_TIME_PLOT], 
-                                         fig_file=out_dir/'meanSigmaExp', PLOT=PLOT)
-        
+    exp_file = Path(exp_file)
+    print(f'Reading experimental data from \n\t{exp_file.resolve()}')
+    if exp_file.suffix == '.npz':
+        exp_data = jnp.load(exp_file)
+    elif exp_file.suffix == '.h5':
+        # https://stackoverflow.com/a/41586571/17220538
+        exp_data = h5py.File(exp_file, 'r')
+        print(f'Available datasets: {list(exp_data.keys())}')
+    else:
+        raise ValueError('Unknown experimental data file format {exp_file.suffix}')
+    
+    # check where experimental data lie within the +/- 2 sigma band around the
+    # sample mean value, for both the prior and the posterior
+    check_sigma_opts = {'exp': jnp.asarray(exp_data['solution']),
+                        'x': jnp.asarray(mesh['x']),
+                        't': jnp.asarray(mesh['t']),
+                        'x_exp': jnp.asarray(exp_data['x']),
+                        't_exp': jnp.asarray(exp_data['t']),
+                        'N_sigma': 2,
+                        't_plot': exp_data['t'][-1]
+                        }
+    post.check_experiments_in_sigma_band(prior_data['solution'], **check_sigma_opts,
+                                         fig_file=out_dir/'meanSigmaExpPrior', )
+    post.check_experiments_in_sigma_band(posterior_data['solution'], **check_sigma_opts,
+                                         fig_file=out_dir/'meanSigmaExpPosterior')
+    
+    if beta_exact is not None:
+        post.compare_exact_beta(prior_data['beta'], beta_exact['beta'], 
+                                mesh['x'], mesh['t'], beta_exact['x'], beta_exact['t'], 
+                                t_plot=beta_exact['t'][-1], fig_file=out_dir/'checkBeta')
 # =============================================================================
 #         # get first object name/key; may or may NOT be a group
 #         a_group_key = list(f.keys())[0]

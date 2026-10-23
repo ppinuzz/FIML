@@ -22,12 +22,11 @@ if str(FIML_pkg) not in sys.path:
 import fiml
 
 
-
 #%% USER INPUT
 
-POST_PROC = False
-ANALYSIS = False
 if len(sys.argv) > 1:
+    ANALYSIS = False
+    POST_PROC = False
     # 0: filename
     # 1: flag
     # 2: flag argument
@@ -58,8 +57,8 @@ if len(sys.argv) > 1:
                 raise ValueError('Unknown CLI input')
 else:
     # interactive execution from Spyder
-    ANALYSIS = True
-    POST_PROC = False
+    ANALYSIS = False
+    POST_PROC = True
     if ANALYSIS:
         input_file = Path('test_input.yaml')
         #output_file = Path('test_postproc.yaml')
@@ -67,6 +66,7 @@ else:
     if POST_PROC:
         input_file = None
         output_file = Path('Burgers_post.yaml')
+        #output_file = Path('test_post.yaml')
 
 
 if input_file is None:
@@ -118,14 +118,19 @@ else:
 if output_file is not None:
     with open(output_file, 'r') as file:
         output_data = yaml.safe_load(file)
-    data_file_out = Path(output_data['data_file'])
+    sol_file = Path(output_data['solution_file'])
     
     post_dir = Path(output_data['output_dir'])
+    
+    exp_data_file = Path(output_data['data_file'])
+    beta_exact_file = Path(output_data['exact_beta_file'])
+    cfg_file = Path(output_data['problem_cfg_file'])
 
 
 #%% ------------------ DO NOT TOUCH ANYTHING BELOW THIS LINE ------------------
 
-exp_data = jnp.load(exp_data_file)
+if ANALYSIS:
+    exp_data = jnp.load(exp_data_file)
 beta_exact = jnp.load(beta_exact_file)
 cfg = jnp.load(cfg_file)
 
@@ -142,7 +147,7 @@ BC = {'u0': cfg['u0'],
 
 if __name__ == '__main__':
     if POST_PROC:
-        fiml.main.postprocessing(data_file_out, post_dir)
+        fiml.main.postprocessing(sol_file, exp_data_file, post_dir, beta_exact=beta_exact)
     if ANALYSIS:
         fiml.main.analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t,
                        sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,
