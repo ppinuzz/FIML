@@ -76,17 +76,29 @@ def create_basis_functions_matrix(N_basis, xi, p=3, PLOT=False, domain=None):
     return B_mat
 
 #@jax.jit
-def beta(theta_r, B_x, B_t, NO_NEG=False, BETA_MIN=1e-2):
-    beta_r = _beta_basis_functions(theta_r, B_x, B_t)
-    if NO_NEG:
-        # TODO: find a way to avoid having nu < 0 (i.e. not having beta < 0)
-        #beta_r = jnp.maximum(beta_r, BETA_MIN)
-        beta_r = BETA_MIN + (1.0 - BETA_MIN)*jax.nn.softplus(beta_r-1)/jnp.log(2)
+def beta(theta_r, B_x, B_t, model='BxBt_softplus', NO_NEG=False, BETA_MIN=1e-2,
+         beta_ref=1):
+    
+    match model:
+        case 'BxBt':
+            # beta = 1 + sum_mq Bm(x) theta_mq Bq(t)
+            beta_r = _beta_basis_functions(theta_r, B_x, B_t, beta_ref=beta_ref)
+        case 'BxBt_softplus':
+            # z = sum_mq Bm(x) theta_mq Bq(t)
+            z = _beta_basis_functions(theta_r, B_x, B_t, beta_ref=0)
+            beta_r = BETA_MIN + (1.0 - BETA_MIN)*jax.nn.softplus(z)/jnp.log(2)
+        case 'BxBt_exp':
+            # beta = exp(z), with z = sum_mq Bm(x) theta_mq Bq(t)
+            z = _beta_basis_functions(theta_r, B_x, B_t, beta_ref=0)
+            beta_r = jnp.exp(z)
+        case _:
+            raise ValueError(f"Unknown beta function model '{model}'")
     
     return beta_r
 
 
-def _beta_basis_functions(theta_r, B_x, B_t):
+def _beta_basis_functions(theta_r, B_x, B_t, beta_ref=1):
+    
     N_basis_x = B_x.shape[0]
     N_basis_t = B_t.shape[0]
     # theta = vector of vectors 
@@ -97,15 +109,8 @@ def _beta_basis_functions(theta_r, B_x, B_t):
     # transform it to a matrix [theta_1, theta_2, ..., theta_M] (M x Q)
     Theta_r = jnp.reshape(theta_r, (N_basis_x, N_basis_t))
     # correction for the entire space-time mesh (N_x x N_t)
-    beta_r = 1 + B_x.T @ Theta_r @ B_t
+    beta_r = beta_ref + B_x.T @ Theta_r @ B_t
     
-    return beta_r
-
-
-def _beta_basis_functions_exp(theta_r, B_x, B_t):
-    # only matrix product Bx^T * Theta * Bt
-    beta_r = _beta_basis_functions(theta_r, B_x, B_t) - 1
-    beta_r = jnp.exp(beta_r)
     return beta_r
 
 
