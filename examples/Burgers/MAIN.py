@@ -121,7 +121,10 @@ with h5py.File(sol_file, 'r') as file:
           }
     nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
     if 'beta' in file.keys():
-        beta_exact = jnp.asarray(file['beta']['beta'])
+        beta_exact = {'x': jnp.asarray(file['mesh']['x']),
+                      't': jnp.asarray(file['mesh']['t']),
+                      'beta': jnp.asarray(file['beta']['beta'])
+                      }
     else:
         beta_exact = None
 

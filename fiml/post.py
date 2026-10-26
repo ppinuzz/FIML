@@ -109,8 +109,11 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
     
     # beta originally is transposed because of how it's formulated as a matrix
     # product (i.e. Nx x Nt, not Nt x Nx like the solution matrix)
-    # (average as beta_num is a 2D space-time field for each sample => 3D array)
-    beta_num_mean = jnp.mean(beta_num, axis=2)
+    if beta_num.ndim == 3:
+        # (average as beta_num is a 2D space-time field for each sample => 3D array)
+        beta_num_mean = jnp.mean(beta_num, axis=2)
+    else:
+        beta_num_mean = beta_num
     if beta_num_mean.shape == (x.size, t.size):
         beta_num_mean = beta_num_mean.T
     if beta_exact.shape == (x_beta.size, t_beta.size):

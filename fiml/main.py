@@ -25,15 +25,18 @@ import fiml.post as post
 def run_solver_case(run_id, theta_r, solver_fun, N_basis_x, N_basis_t, B_x, B_x_interf, 
                     B_t, nu, x_mesh, t_mesh, u_IC, u0, uL, out_dir, TOL=1e-5, BETA_MIN=1e-2,
                     PRINT_ERR_MSG=True):
+    if N_basis_t is None:
+        STEADY = True
     
     beta_r = fiml.beta(theta_r, B_x, B_t, NO_NEG=True)
     
     # apply ICs and BCs + solve corrected Burgers' eq.
     solution = jnp.zeros(shape=(t_mesh.size, x_mesh.size))
-    solution = solution.at[0,:].set(u_IC)
+    if not STEADY:
+        solution = solution.at[0,:].set(u_IC)
     solution = solution.at[:,0].set(u0)
     solution = solution.at[:,-1].set(uL)
-    solution, max_res = solver_fun(solution, x_mesh, t_mesh, nu, beta=beta_r, WRITE_LOG=False, tol=TOL)
+    solution, max_res = solver_fun(solution, x_mesh, t_mesh, nu, beta=beta_r, WRITE_LOG=False, tol=TOL, STEADY=STEADY)
     
     # check if solver didn't converge or produced NaN's/Inf's
     not_converged = (max_res > TOL)
@@ -88,14 +91,21 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     N_t = t_mesh.size
     L = x_mesh[-1] - x_mesh[0]
     t0 = t_mesh[0]
-    T = t_mesh[-1] - t_mesh[0]
+    if N_t == 1:
+        aux.warning('Steady problem: initial conditions, time length and dt will be ignored')
+        T = None
+        dt = None
+        STEADY = True
+    else:
+        T = t_mesh[-1] - t_mesh[0]
+        dt = t_mesh[1] - t_mesh[0]
+        STEADY = False
+        if not jnp.all(jnp.isclose(jnp.diff(t_mesh), dt)):
+            raise ValueError('Only uniform time grids are supported')
     # HACK: assuming uniform spacing in time and space
     dx = x_mesh[1] - x_mesh[0]
-    dt = t_mesh[1] - t_mesh[0]
     if not jnp.all(jnp.isclose(jnp.diff(x_mesh), dx)):
         raise ValueError('Only uniform space grids are supported')
-    if not jnp.all(jnp.isclose(jnp.diff(t_mesh), dt)):
-        raise ValueError('Only uniform time grids are supported')
     
     hdf5_group = out_file.create_group('mesh')
     tmp_set = hdf5_group.create_dataset(name='x', data=x_mesh, **comprex_opts)
@@ -105,11 +115,22 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     # write to disk without closing the file
     out_file.flush()
     
+    # NUMERICS
+    if STEADY:
+        if N_basis_t is not None:
+            aux.warning('Steady problems should not use time basis-function matrix B_t, '
+                        f'but {N_basis_t} time basis functions are given, skipping them...')
+        N_basis_t = None
+    
+    
     # BOUNDARY CONDITIONS
     u0 = BC['u0']
     uL = BC['uL']
     u_IC_fun = BC['u_IC']                   # function u0(x)
-    u_IC = jnp.asarray(u_IC_fun(x_mesh))    # numerical discretisation of u0
+    if u_IC_fun(x_mesh[0]) is not None:
+        u_IC = jnp.asarray(u_IC_fun(x_mesh))    # numerical discretisation of u0
+    else:
+        u_IC = None
     
     # EXPERIMENTAL DATA
     x_exp = jnp.asarray(exp_data['x'])
@@ -131,22 +152,23 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
         print(f'Writing experimental data to \n\t{Path(exp_out_file.filename).resolve()}')
         exp_out_file.close()
     
-    # check that experimental data and simulation data start and end at the same
-    # time instant (or that, at least, the simulation is longer than the experiment)
-    # discretisation with step dt => any number within -dt/2 and +dt/2 is associated
-    # to the instant 0
-    if t_exp[0] < t0-0.5*dt or t_exp[0] > t0+0.5*dt:
-        raise ValueError('Experimental data and simulation must start at the same time instant '
-                         '(within a dt/2)\n'
-                         f'Experimental data t0  : {t_exp[0]} s\n'
-                         f'Simulation t0         : {t0} s\n')
-    if T < t_exp[-1]:
-        aux.warning('Numerical simulation is shorter than the experimental data: \n'
-                    f'T numerical: {T} s\n'
-                    f'T experiment: {t_exp[-1]} s\n'
-                    'Limiting experimental data to numerical simulation end time T = {T} s')
-        t_exp = t_exp[t_exp <= T]
-        sol_exp = sol_exp[t_exp<=T, :]
+    if not STEADY:
+        # check that experimental data and simulation data start and end at the same
+        # time instant (or that, at least, the simulation is longer than the experiment)
+        # discretisation with step dt => any number within -dt/2 and +dt/2 is associated
+        # to the instant 0
+        if t_exp[0] < t0-0.5*dt or t_exp[0] > t0+0.5*dt:
+            raise ValueError('Experimental data and simulation must start at the same time instant '
+                             '(within a dt/2)\n'
+                             f'Experimental data t0  : {t_exp[0]} s\n'
+                             f'Simulation t0         : {t0} s\n')
+        if T < t_exp[-1]:
+            aux.warning('Numerical simulation is shorter than the experimental data: \n'
+                        f'T numerical: {T} s\n'
+                        f'T experiment: {t_exp[-1]} s\n'
+                        'Limiting experimental data to numerical simulation end time T = {T} s')
+            t_exp = t_exp[t_exp <= T]
+            sol_exp = sol_exp[t_exp<=T, :]
     
     
     #%% PARAMETRISE CORRECTION FUNCTION BETA
@@ -156,16 +178,20 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     #   [ ...   ...   ... ]
     #   [Bn(t0) ... Bn(tN)]
     # where t can be either time (for B_t) or space (for B_x)
-    print('Calculating basis function matrices B_X and B_T...')
+    print('Calculating basis function matrices...')
     B_x = fiml.create_basis_functions_matrix(N_basis_x, x_mesh)
-    B_t = fiml.create_basis_functions_matrix(N_basis_t, t_mesh)
+    if not STEADY:
+        B_t = fiml.create_basis_functions_matrix(N_basis_t, t_mesh)
+    else:
+        # "identity matrix" with only 1 element
+        B_t = jnp.eye(1)
     # same, but evaluated at interface nodes
     # (N nodes => N-1 interfaces => N-1 interface nodes)
     x_interf = 0.5 * (x_mesh[:-1] + x_mesh[1:])
     # specify the original domain mesh, so that its length is okay
     B_x_interf = fiml.create_basis_functions_matrix(N_basis_x, x_interf, domain=x_mesh)
     
-    N_theta = N_basis_x * N_basis_t
+    N_theta = N_basis_x * N_basis_t if N_basis_t is not None else N_basis_x
     print(f'Number of theta parameters to find: {N_theta}')
     
     

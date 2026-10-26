@@ -284,7 +284,9 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRIT
     if STEADY:
         # using u = 0 everywhere as initial guess when u0 != 0 (or uL != 0) can
         # introduce a discontinuity betweeen initial guess and BCs => crash
-        warning('Initialing steady solution with linear profile satisfying boundary conditions...')
+        if WRITE_LOG:
+            warning('Initialing steady solution with linear profile satisfying '
+                    'boundary conditions...')
         sol = sol.at[0,:].set(jnp.linspace(sol[0,0], sol[0,-1], x_mesh.size))
 
     sol, max_res, iterations = _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max)
