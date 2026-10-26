@@ -8,7 +8,6 @@ References:
 @author: Andrea Pinardi <andrea.pinardi@polimi.it>
 """
 
-import numpy as np
 from prettytable import PrettyTable
 
 import jax
@@ -16,6 +15,14 @@ import jax
 jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
 from functools import partial
+from colorama import Fore, Style, just_fix_windows_console
+# call it once on Windows to fix ANSI coloured text in terminals
+# (does nothing on other OS's)
+just_fix_windows_console()
+
+
+def warning(message):
+    print(Fore.YELLOW + message + Style.RESET_ALL)
 
 
 def u_x(u, dx):
@@ -84,8 +91,11 @@ def residual(u, u_old, x, t, dt, nu, beta_t):
         R(u) = du/dt + u du/dx - d(nu * du/dx)/dx
     """
     dx = x[1] - x[0]
-    # 1st order backward in time
-    dudt = (u - u_old) / dt
+    if dt is None:
+        dudt = jnp.zeros_like(u)
+    else:
+        # 1st order backward in time
+        dudt = (u - u_old) / dt
     # 2nd order centred in space @ grid nodes
     dudx = u_x(u, dx)
     nu_f = nu_faces(u, x, t, nu, beta_t)
@@ -172,7 +182,15 @@ def newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu, beta_t):
 @partial(jax.jit, static_argnames=('nu', ))
 def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max):
     """Compiled Newton and time loops, viscosity must NOT depend on u_xx"""
-    dt = t_mesh[1] - t_mesh[0]
+    if t_mesh.size > 1:
+        dt = t_mesh[1] - t_mesh[0]
+        # loop through time starting from t[idx_time]
+        # 1: skip 1st instant, given by BC
+        idx_time = 1
+    else:
+        # there's only one time instant
+        idx_time = 0
+        dt = None
 
     def advance_time_step(u_old, inputs):
         time, u0, uL, beta_t = inputs
@@ -227,20 +245,28 @@ def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max):
                                              # initial carry value: u(x,0)
                                              sol[0, :],
                                              # thing to loop over
-                                             (t_mesh[1:], sol[1:,0], sol[1:,-1], beta[:,1:].T)
+                                             (t_mesh[idx_time:], sol[idx_time:,0], sol[idx_time:,-1], beta[:,idx_time:].T)
     )
 
-    solution = jnp.vstack((sol[0, :], u_sol))
+    if dt is None:
+        # if problem is steady, sol[0] contains the initial guess, not the 
+        # analytically exact IC
+        solution = u_sol
+    else:
+        solution = jnp.vstack((sol[0, :], u_sol))
     # 1st residual is 0, since u(x,0) is the known IC
-    max_res = jnp.concatenate((jnp.zeros((1,)), errors))
+    max_res = jnp.concatenate((jnp.zeros((idx_time, )), errors))
     return solution, max_res, iters
 
 
-def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRITE_LOG=True):
+def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRITE_LOG=True,
+                  STEADY=False):
     if x_mesh.size < 4:
         raise ValueError('At least 4 spatial nodes are required')
-    if t_mesh.size < 2:
-        raise ValueError('At least 2 time instants are required')
+    if STEADY and t_mesh.size != 1:
+        raise ValueError('Steady problems require exactly one time instant')
+    if not STEADY and t_mesh.size < 2:
+        raise ValueError('Unsteady problems require at least two time instants')
 
     # ensure inputs are JAX arrays
     sol = jnp.asarray(sol, dtype=jnp.float64)
@@ -255,12 +281,25 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRIT
     else:
         beta = jnp.asarray(beta)
 
+    if STEADY:
+        # using u = 0 everywhere as initial guess when u0 != 0 (or uL != 0) can
+        # introduce a discontinuity betweeen initial guess and BCs => crash
+        warning('Initialing steady solution with linear profile satisfying boundary conditions...')
+        sol = sol.at[0,:].set(jnp.linspace(sol[0,0], sol[0,-1], x_mesh.size))
+
     sol, max_res, iterations = _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max)
 
     if WRITE_LOG:
         solver_table = PrettyTable()
         solver_table.title = "Burgers' equation"
         solver_table.field_names = ['t [s]', 'Max residual u [m/s2]', 'Iterations']
+        if STEADY:
+            n_iter_0 = iterations[0]
+        else:
+            # 1st row: no iterations done for unsteady problems, as the solution
+            # is given by the IC
+            n_iter_0 = 0
+        solver_table.add_row([f'{t_mesh[0]:.6f}', f'{max_res[0]:.5e}', f'{n_iter_0}'])
         for t, err, k in zip(t_mesh[1:], max_res[1:], iterations):
             solver_table.add_row([f'{t:.6f}', f'{err:.5e}', str(k)])
         print(solver_table)

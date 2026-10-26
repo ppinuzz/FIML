@@ -24,7 +24,7 @@ import cloudpickle
 import h5py
 import burgers
 # setup files directory
-setup_dir = Path(r'./problem_setup')
+setup_dir = Path(r'./setup_Burgers')
 if str(setup_dir) not in sys.path:
     sys.path.append(str(setup_dir))
 
@@ -39,9 +39,9 @@ SOLVE = False
 EXTRACT_PROBES = False
 
 # setup files
-#import problem_setup.BChom_ICsin_nu_xt as cfg
-#import problem_setup.BChom_ICsin_nu_xuux as cfg
-import problem_setup.BChom_ICsin_nu_u as cfg
+#import setup_Burgers.BChom_ICsin_nu_xt as cfg
+#import setup_Burgers.BChom_ICsin_nu_xuux as cfg
+import setup_Burgers.BChom_ICsin_nu_u as cfg
 
 
 #%% ------------------ DO NOT TOUCH ANYTHING BELOW THIS LINE ------------------
@@ -96,8 +96,14 @@ if len(sys.argv) > 1:
 
 # N intervals => N + 1 points
 N_x = int(jnp.ceil((cfg.xL - cfg.x0)/cfg.dx)) + 1
-N_t = int(jnp.ceil(cfg.T/cfg.dt)) + 1
 x_mesh = jnp.linspace(cfg.x0, cfg.xL, N_x)
+if cfg.dt is None:
+    STEADY = True
+    burgers.warning('The problem will be treated as steady')
+    N_t = 1
+else:
+    STEADY = False
+    N_t = int(jnp.ceil(cfg.T/cfg.dt)) + 1
 t_mesh = jnp.linspace(0, cfg.T, N_t)
 sol_basic = jnp.zeros(shape=(N_t, N_x))
 sol_var_nu = jnp.zeros(shape=(N_t, N_x))
@@ -107,16 +113,19 @@ sol_var_nu = jnp.zeros(shape=(N_t, N_x))
 
 if SOLVE:
     # apply ICs and BCs
-    sol_basic = sol_basic.at[0,:].set(cfg.u_IC(x_mesh))
+    if not STEADY:
+        sol_basic = sol_basic.at[0,:].set(cfg.u_IC(x_mesh))
     sol_basic = sol_basic.at[:,0].set(cfg.u0)
     sol_basic = sol_basic.at[:,-1].set(cfg.uL)
-    sol_var_nu = sol_var_nu.at[0,:].set(cfg.u_IC(x_mesh))
+    if not STEADY:
+        sol_var_nu = sol_var_nu.at[0,:].set(cfg.u_IC(x_mesh))
     sol_var_nu = sol_var_nu.at[:,0].set(cfg.u0)
     sol_var_nu = sol_var_nu.at[:,-1].set(cfg.uL)
     
     # BASIC BURGERS' EQUATION
     start_time = timer()
-    sol_basic, max_res_basic = burgers.solve_Burgers(sol_basic, x_mesh, t_mesh, nu=cfg.nu0_fun)
+    sol_basic, max_res_basic = burgers.solve_Burgers(sol_basic, x_mesh, t_mesh, 
+                                                     nu=cfg.nu0_fun, STEADY=STEADY)
     end_time = timer()
     time_basic = end_time - start_time
     print(f'Elapsed time: {time_basic} s ({timedelta(seconds=time_basic)} hours)')
@@ -138,7 +147,8 @@ if SOLVE:
     #%% VARIABLE VISCOSITY BURGERS' EQUATION
     
     start_time = timer()
-    sol_var_nu, max_res_var_nu = burgers.solve_Burgers(sol_var_nu, x_mesh, t_mesh, nu=cfg.nu)
+    sol_var_nu, max_res_var_nu = burgers.solve_Burgers(sol_var_nu, x_mesh, t_mesh, 
+                                                       nu=cfg.nu, STEADY=STEADY)
     end_time = timer()
     time_var_nu = end_time - start_time
     print(f'Elapsed time: {time_var_nu} s ({timedelta(seconds=time_var_nu)} hours)')
@@ -312,34 +322,37 @@ if EXTRACT_PROBES:
 #%% PLOT SOLUTION
 
 if SOLVE:
-    print('!! CLOSE ALL FIGURES TO TERMINATE EXECUTION !!')
+    burgers.warning('!! CLOSE ALL FIGURES TO TERMINATE EXECUTION !!')
     
     plt.figure()
-    plt.plot(x_mesh, cfg.u_IC(x_mesh), label='$u(x,0)$')
+    if not STEADY:
+        plt.plot(x_mesh, cfg.u_IC(x_mesh), label='$u(x,0)$')
     plt.plot(x_mesh, sol_basic[-1,:], label=r'$u$ with $\nu = \nu_0$')
     plt.plot(x_mesh, sol_var_nu[-1,:], label=r'$u$ with $\nu = \nu(x,t,u,u_x)$')
     plt.xlabel('x [m]')
     plt.ylabel('u [m/s]')
     plt.autoscale(enable=True, axis='x', tight=True)
     plt.legend()
-    plt.title(f'$t = T = {cfg.T}$ s')
+    if not STEADY:
+        plt.title(f'$t = T = {cfg.T}$ s')
     plt.show(block=False)
     
-    plt.figure()
-    plt.semilogy(t_mesh, max_res_basic, label=r'$\nu = \nu_0$')
-    plt.semilogy(t_mesh, max_res_var_nu, label=r'$\nu = \nu(x,t,u,u_x)$')
-    plt.xlabel('t [s]')
-    plt.ylabel(r'$\max|\mathcal{B}(u^k)|$ [m/s$^2$]')
-    plt.autoscale(enable=True, axis='x', tight=True)
-    plt.title('Maximum residual')
-    plt.legend()
-    # non blocking, so that it won't wait for the user to close the window
-    plt.show(block=False)
-    #plt.show()
+    if not STEADY:
+        plt.figure()
+        plt.semilogy(t_mesh, max_res_basic, label=r'$\nu = \nu_0$')
+        plt.semilogy(t_mesh, max_res_var_nu, label=r'$\nu = \nu(x,t,u,u_x)$')
+        plt.xlabel('t [s]')
+        plt.ylabel(r'$\max|\mathcal{B}(u^k)|$ [m/s$^2$]')
+        plt.autoscale(enable=True, axis='x', tight=True)
+        plt.title('Maximum residual')
+        plt.legend()
+        # non blocking, so that it won't wait for the user to close the window
+        plt.show(block=False)
+        #plt.show()
     
     plt.show()
 
-if VIDEO:
+if not STEADY and VIDEO:
     fig, ax = plt.subplots()
     line, = ax.plot(x_mesh, jnp.zeros_like(x_mesh))
     ax.legend(loc='upper right')

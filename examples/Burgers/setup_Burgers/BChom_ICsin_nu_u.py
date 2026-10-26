@@ -35,7 +35,7 @@ u_IC = lambda x: None
 
 # uniform mesh => set dt to None to treat the problem as steady
 dt = None
-dx = 7.813e-5
+dx = 1e-5
 
 
 #%% VISCOSITY
