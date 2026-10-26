@@ -41,7 +41,7 @@ EXTRACT_PROBES = False
 # setup files
 #import setup_Burgers.BChom_ICsin_nu_xt as cfg
 #import setup_Burgers.BChom_ICsin_nu_xuux as cfg
-import setup_Burgers.BChom_ICsin_nu_u as cfg
+import setup_Burgers.BCDirichlet_steady_nu_u as cfg
 
 
 #%% ------------------ DO NOT TOUCH ANYTHING BELOW THIS LINE ------------------
