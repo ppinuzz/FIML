@@ -25,8 +25,8 @@ import fiml.post as post
 def run_solver_case(run_id, theta_r, solver_fun, N_basis_x, N_basis_t, B_x, B_x_interf, 
                     B_t, nu, x_mesh, t_mesh, u_IC, u0, uL, out_dir, TOL=1e-5, BETA_MIN=1e-2,
                     PRINT_ERR_MSG=True):
-    if N_basis_t is None:
-        STEADY = True
+
+    STEADY = True if N_basis_t is None else False
     
     beta_r = fiml.beta(theta_r, B_x, B_t, NO_NEG=True)
     
@@ -43,21 +43,26 @@ def run_solver_case(run_id, theta_r, solver_fun, N_basis_x, N_basis_t, B_x, B_x_
     nan_inf_values = jnp.any(~jnp.isfinite(solution), axis=1) | ~jnp.isfinite(max_res)
     # jax.lax.cond() replaces if (...) when the object is a JAX object in a JIT
     # compiled function
-    jax.lax.cond(jnp.any(not_converged), 
+    jax.lax.cond(PRINT_ERR_MSG & jnp.any(not_converged), 
                  # jax.debug.print() replaces print() in JIT-compiled functions
-                 lambda PRINT_ERR_MSG: jax.debug.print(
-                         f'{sum(not_converged)/not_converged.size} time instants '
-                         'did not converge for run {run_id}') if PRINT_ERR_MSG else None,
+                 lambda _: jax.debug.print(
+                             '{n_fail}/{n_tot} time instants did not converge for run {run_id}',
+                             n_fail=jnp.count_nonzero(not_converged),
+                             n_tot=not_converged.size,
+                             run_id=run_id),
                  lambda _: None,
-                 operand=None
+                 operand=PRINT_ERR_MSG
                  )
-    
-    jax.lax.cond(jnp.any(nan_inf_values), 
-                 lambda PRINT_ERR_MSG: jax.debug.print(
-                         f'{sum(nan_inf_values)/nan_inf_values.size} time instants ' 
-                         'returned a NaN/Inf solution and/or residual for run {run_id}') if PRINT_ERR_MSG else None,
+        
+    jax.lax.cond(PRINT_ERR_MSG & jnp.any(nan_inf_values), 
+                 lambda _: jax.debug.print(
+                             '{n_nan}/{n_tot} time instants returned a NaN/Inf '
+                             'solution and/or residual for run {run_id}',
+                             n_nan=jnp.count_nonzero(nan_inf_values),
+                             n_tot=nan_inf_values.size,
+                             run_id=run_id),
                  lambda _: None,
-                 operand=None
+                 operand=PRINT_ERR_MSG
                  )
     success = ~jnp.any(not_converged | nan_inf_values)
     
@@ -76,7 +81,7 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
         PLOT = False
     
     # OUTPUT DATA FILE
-    out_dir.mkdir(exist_ok=True)
+    out_dir.mkdir(parents=True, exist_ok=True)
     out_file = h5py.File(out_dir/'output.h5', 'w')
     # common compression options
     # shuffle: allows blocks to be moved around, possible memory gain
@@ -127,10 +132,11 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     u0 = BC['u0']
     uL = BC['uL']
     u_IC_fun = BC['u_IC']                   # function u0(x)
-    if u_IC_fun(x_mesh[0]) is not None:
-        u_IC = jnp.asarray(u_IC_fun(x_mesh))    # numerical discretisation of u0
-    else:
+    if STEADY:
         u_IC = None
+    else:
+        # numerical discretisation of u0
+        u_IC = jnp.asarray(u_IC_fun(x_mesh))
     
     # EXPERIMENTAL DATA
     x_exp = jnp.asarray(exp_data['x'])
@@ -325,7 +331,7 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     # baseline solution: beta = 1 => theta = 0
     fiml.compare_baseline_MAP_solutions(sol_MAP, jnp.zeros_like(theta_MAP), solver_wrap, 
                                         sol_exp, x=x_mesh, x_exp=x_exp, t=t_mesh, t_exp=t_exp,
-                                        PLOT=True)
+                                        PLOT=PLOT)
 
     
     #%% CALCULATE COVARIANCE OF THE POSTERIOR (HESSIAN)

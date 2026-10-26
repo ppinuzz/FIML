@@ -94,7 +94,7 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
     # if no time instant to plot is given, the last one is assumed
     # (where discrepancy is likely to be the biggest)
     if t_plot is None:
-        idx_plot_exp = -1
+        idx_plot_beta = -1
         aux.warning('No time instant given, the last instant '
                     f't = {t_beta[idx_plot_exp]} s will be plotted...')
     else:
