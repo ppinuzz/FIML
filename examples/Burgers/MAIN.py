@@ -77,8 +77,8 @@ if ANALYSIS:
     probes_file = Path(input_data['data_file'])
     out_dir = Path(input_data['output_dir'])
     
-    N_basis_x = int(input_data['num_basis_functions_x'])
-    N_basis_t = int(input_data['num_basis_functions_t'])
+    beta_opts = fiml.fiml.read_beta_options(input_data)
+    
     sigma2_prior = float(input_data['variance_prior'])
     N_sampling_prior = int(input_data['num_samples_prior'])
     N_sampling_post = int(input_data['num_samples_posterior'])
@@ -90,6 +90,7 @@ if ANALYSIS:
     CHECK = input_data['check_outputs']
     VIDEO = input_data['show_videos']
     BATCH = input_data['batch_mode']
+    STEADY = input_data['steady']
 
 if POST_PROC:
     with open(output_file, 'r') as file:
@@ -133,7 +134,7 @@ if __name__ == '__main__':
     if POST_PROC:
         fiml.main.postprocessing(sol_file, exp_data_file, post_dir, beta_exact=beta_exact)
     if ANALYSIS:
-        fiml.main.analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t,
+        fiml.main.analysis(exp_data, mesh, BC, nu, out_dir, beta_opts,
                        sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,
                        N_WORKERS, RUN_PARALLEL, solve_Burgers, CHECK, VIDEO,
-                       beta_exact, BATCH, IDX_TIME_PLOT=-1)
+                       beta_exact, BATCH, IDX_TIME_PLOT=-1, STEADY=STEADY)

@@ -22,13 +22,10 @@ import fiml.auxiliaries as aux
 import fiml.post as post
 
 
-def run_solver_case(run_id, theta_r, solver_fun, N_basis_x, N_basis_t, B_x, B_x_interf, 
-                    B_t, nu, x_mesh, t_mesh, u_IC, u0, uL, out_dir, TOL=1e-5, BETA_MIN=1e-2,
-                    PRINT_ERR_MSG=True):
-
-    STEADY = True if N_basis_t is None else False
+def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh, 
+                    u_IC, u0, uL, STEADY, out_dir, TOL=1e-5, PRINT_ERR_MSG=True):
     
-    beta_r = fiml.beta(theta_r, B_x, B_t, NO_NEG=True)
+    beta_r = beta_fun(theta_r)
     
     # apply ICs and BCs + solve corrected Burgers' eq.
     solution = jnp.zeros(shape=(t_mesh.size, x_mesh.size))
@@ -69,10 +66,10 @@ def run_solver_case(run_id, theta_r, solver_fun, N_basis_x, N_basis_t, B_x, B_x_
     return run_id, solution, max_res, success
 
 
-def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior, 
-         N_sampling_prior, N_sampling_post, SEED, sigma2_obs, N_WORKERS, RUN_PARALLEL,
-         solver_fun, CHECK=False, VIDEO=False, beta_exact=None, BATCH=False,
-         IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True):
+def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior, 
+             N_sampling_prior, N_sampling_post, SEED, sigma2_obs, N_WORKERS, RUN_PARALLEL,
+             solver_fun, CHECK=False, VIDEO=False, beta_exact=None, BATCH=False,
+             IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True, STEADY=True):
     
     if BATCH:
         aux.warning('BATCH mode selected, turning off all plot flags...')
@@ -122,10 +119,11 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     
     # NUMERICS
     if STEADY:
-        if N_basis_t is not None:
-            aux.warning('Steady problems should not use time basis-function matrix B_t, '
-                        f'but {N_basis_t} time basis functions are given, skipping them...')
-        N_basis_t = None
+        if 'N_basis_t' in beta_opts and beta_opts['N_basis_t'] is not None:
+            aux.warning("Steady problems should not use time basis-function matrix B_t, "
+                        f"but {beta_opts['N_basis_t']} time basis functions are given, "
+                        "skipping them...")
+        beta_opts['N_basis_t'] = None
     
     
     # BOUNDARY CONDITIONS
@@ -179,26 +177,7 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     
     #%% PARAMETRISE CORRECTION FUNCTION BETA
     
-    # matrices containing
-    #   [B0(t0) ... B0(tN)]
-    #   [ ...   ...   ... ]
-    #   [Bn(t0) ... Bn(tN)]
-    # where t can be either time (for B_t) or space (for B_x)
-    print('Calculating basis function matrices...')
-    B_x = fiml.create_basis_functions_matrix(N_basis_x, x_mesh)
-    if not STEADY:
-        B_t = fiml.create_basis_functions_matrix(N_basis_t, t_mesh)
-    else:
-        # "identity matrix" with only 1 element
-        B_t = jnp.eye(1)
-    # same, but evaluated at interface nodes
-    # (N nodes => N-1 interfaces => N-1 interface nodes)
-    x_interf = 0.5 * (x_mesh[:-1] + x_mesh[1:])
-    # specify the original domain mesh, so that its length is okay
-    B_x_interf = fiml.create_basis_functions_matrix(N_basis_x, x_interf, domain=x_mesh)
-    
-    N_theta = N_basis_x * N_basis_t if N_basis_t is not None else N_basis_x
-    print(f'Number of theta parameters to find: {N_theta}')
+    beta_fun, N_theta = fiml.parametrise_beta(beta_opts, x_mesh, t_mesh, STEADY)
     
     
     #%% DRAW FROM PRIOR DISTRIBUTION
@@ -217,11 +196,9 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     #%% SOLVE CORRECTED BURGERS' EQUATION
     
     solution_corrected, max_res_corrected, success_corrected = fiml.launch_sampling(theta_prior_samples, run_solver_case, solver_fun, N_x, N_t, 
-                    N_sampling_prior, (N_basis_x, N_basis_t, B_x, B_x_interf, 
-                    B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
+                    N_sampling_prior, (beta_fun, nu, x_mesh, t_mesh, u_IC, u0, uL, STEADY), RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
     
-    beta_corrected = jax.vmap(lambda theta: fiml.beta(theta, B_x, B_t, NO_NEG=True),
-                              in_axes=1, out_axes=2)(theta_prior_samples)
+    beta_corrected = jax.vmap(beta_fun, in_axes=1, out_axes=2)(theta_prior_samples)
     aux.save_sampling(out_file, 'prior', comprex_opts, theta_prior_samples, 
                       solution_corrected, max_res_corrected, success_corrected,
                       beta_corrected)
@@ -246,13 +223,12 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     
     #%% FIND MAXIMUM-A-POSTERIORI BETA/THETA
     
-    def h_theta_sampled(theta, N_basis_x, N_basis_t, B_x, B_x_interf, B_t, nu, 
-                x_mesh, t_mesh, u_IC, u0, uL, x_probes, t_probes):
+    def h_theta_sampled(theta, beta_fun, nu, x_mesh, t_mesh, u_IC, u0, uL, STEADY,
+                        x_probes, t_probes):
         # run_id, solution, max_res
         # k-th row of solution: [t^k, u_1^k, ..., u_Nx^k] = [t^k, u(t^k)]
-        _, sol, _, success = run_solver_case(None, theta, solver_fun, N_basis_x, 
-                                             N_basis_t, B_x, B_x_interf, B_t, nu, 
-                                             x_mesh, t_mesh, u_IC, u0, uL, 
+        _, sol, _, success = run_solver_case(None, theta, solver_fun, beta_fun, nu, 
+                                             x_mesh, t_mesh, u_IC, u0, uL, STEADY,
                                              out_dir=None, PRINT_ERR_MSG=False)
         # sample numerical solution to have it at the same probe locations
         # [t^k, u_1^k, ...m u_Np^k]     Np = N. of probes
@@ -264,9 +240,8 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
         sol_vet = jnp.ravel(sol_probes.T)
         return sol_vet, success
     
-    h_theta = lambda theta: h_theta_sampled(theta, N_basis_x, N_basis_t, B_x, 
-                                            B_x_interf, B_t, nu, x_mesh, t_mesh, 
-                                            u_IC, u0, uL, x_exp, t_exp)
+    h_theta = lambda theta: h_theta_sampled(theta, beta_fun, nu, x_mesh, t_mesh, 
+                                            u_IC, u0, uL, STEADY, x_exp, t_exp)
     # check that covariance matrix is finite, symmetryc, positive semi-definite
     aux.check_covariance_matrix(sigma2_obs)
 
@@ -310,10 +285,9 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     
     theta_MAP = opt.x
     _, sol_MAP, max_res_MAP, success_MAP = run_solver_case(None, theta_MAP, solver_fun, 
-                                            N_basis_x, N_basis_t, 
-                                            B_x, B_x_interf, B_t, nu, x_mesh, t_mesh,
-                                            u_IC, u0, uL, out_dir=None)
-    beta_r = fiml.beta(theta_MAP, B_x, B_t, NO_NEG=True)
+                                            beta_fun, nu, x_mesh, t_mesh,
+                                            u_IC, u0, uL, STEADY, out_dir=None)
+    beta_r = beta_fun(theta_MAP)
     
     
     if CHECK and beta_exact is not None:
@@ -325,9 +299,9 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     
     #%% CHECK MAP SOLUTION VS BASELINE
     
-    solver_wrap = lambda theta: run_solver_case(None, theta, solver_fun, 
-                                    N_basis_x, N_basis_t, B_x, B_x_interf, B_t, 
-                                    nu, x_mesh, t_mesh, u_IC, u0, uL, out_dir=None)
+    solver_wrap = lambda theta: run_solver_case(None, theta, solver_fun, beta_fun, 
+                                                nu, x_mesh, t_mesh, u_IC, u0, uL, 
+                                                STEADY, out_dir=None)
     # baseline solution: beta = 1 => theta = 0
     fiml.compare_baseline_MAP_solutions(sol_MAP, jnp.zeros_like(theta_MAP), solver_wrap, 
                                         sol_exp, x=x_mesh, x_exp=x_exp, t=t_mesh, t_exp=t_exp,
@@ -351,11 +325,9 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
     theta_post_samples = fiml.posterior_sampling(theta_MAP, C_theta_MAP, N_sampling_post, key_random)
     
     solution_posterior, max_res_posterior, success_posterior = fiml.launch_sampling(theta_post_samples, run_solver_case, solver_fun, N_x, N_t, 
-                    N_sampling_post, (N_basis_x, N_basis_t, B_x, B_x_interf, 
-                    B_t, nu, x_mesh, t_mesh, u_IC, u0, uL), RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
+                    N_sampling_post, (beta_fun, nu, x_mesh, t_mesh, u_IC, u0, uL, STEADY), RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
+    beta_posterior = jax.vmap(beta_fun, in_axes=1, out_axes=2)(theta_post_samples)
     
-    beta_posterior = jax.vmap(lambda theta: fiml.beta(theta, B_x, B_t, NO_NEG=True),
-                              in_axes=1, out_axes=2)(theta_post_samples)
     aux.save_sampling(out_file, 'posterior', comprex_opts, theta_post_samples, 
                       solution_posterior, max_res_posterior, success_posterior,
                       beta_posterior)

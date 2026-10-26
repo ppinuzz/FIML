@@ -75,27 +75,6 @@ def create_basis_functions_matrix(N_basis, xi, p=3, PLOT=False, domain=None):
     
     return B_mat
 
-#@jax.jit
-def beta(theta_r, B_x, B_t, model='BxBt_softplus', NO_NEG=False, BETA_MIN=1e-2,
-         beta_ref=1):
-    
-    match model:
-        case 'BxBt':
-            # beta = 1 + sum_mq Bm(x) theta_mq Bq(t)
-            beta_r = _beta_basis_functions(theta_r, B_x, B_t, beta_ref=beta_ref)
-        case 'BxBt_softplus':
-            # z = sum_mq Bm(x) theta_mq Bq(t)
-            z = _beta_basis_functions(theta_r, B_x, B_t, beta_ref=0)
-            beta_r = BETA_MIN + (1.0 - BETA_MIN)*jax.nn.softplus(z)/jnp.log(2)
-        case 'BxBt_exp':
-            # beta = exp(z), with z = sum_mq Bm(x) theta_mq Bq(t)
-            z = _beta_basis_functions(theta_r, B_x, B_t, beta_ref=0)
-            beta_r = jnp.exp(z)
-        case _:
-            raise ValueError(f"Unknown beta function model '{model}'")
-    
-    return beta_r
-
 
 def _beta_basis_functions(theta_r, B_x, B_t, beta_ref=1):
     
@@ -214,23 +193,33 @@ def compare_baseline_MAP_solutions(sol_MAP, theta_baseline, solver_wrap,
     err_report.add_row(['Avg. RMSE [EU]', f'{RMSE_baseline:.3e}', f'{RMSE_MAP:.3e}'])
     aux.check_msg(err_report.get_string())
     
+    # MAE and RMSE @ each x_probe => average over time
+    MAE_MAP_probe = jnp.mean(jnp.abs(err_MAP), axis=0)
+    MAE_baseline_probe = jnp.mean(jnp.abs(err_baseline), axis=0)
+    RMSE_MAP_probe = jnp.sqrt(jnp.mean(err_MAP**2, axis=0))
+    RMSE_baseline_probe = jnp.sqrt(jnp.mean(err_baseline**2, axis=0))
+
     # delta > 0: improvement w.r.t. baseline model
-    delta_MAE = MAE_baseline - MAE_MAP
-    delta_RMSE = RMSE_baseline - RMSE_MAP
+    delta_MAE = MAE_baseline_probe - MAE_MAP_probe
+    delta_RMSE = RMSE_baseline_probe - RMSE_MAP_probe
+    # fraction of probes where MAP outperforms baseline
     N_delta_MAE = jnp.count_nonzero(delta_MAE > 0) / delta_MAE.size
     N_delta_RMSE = jnp.count_nonzero(delta_RMSE > 0) / delta_RMSE.size
-    avg_delta_MAE = jnp.mean(jnp.abs(delta_MAE))
-    avg_delta_RMSE = jnp.mean(jnp.abs(delta_RMSE))
-    
-    aux.check_msg('How to read the table: MAP solution outperforms the baseline solution '
-          '(according to ... metric) in ...% of the time-space domain, with an average '
-          'metric improvement of ...')
-    improv_report = PrettyTable()
-    improv_report.title = 'MAP solution outperforms baseline'
-    improv_report.field_names = ['Metric', '% of space-time domain', 'Average outperform']
-    improv_report.add_row(['MAE', f'{100*N_delta_MAE:.2f}', f'{avg_delta_MAE:.3e}'])
-    improv_report.add_row(['RMSE', f'{100*N_delta_RMSE:.2f}', f'{avg_delta_RMSE:.3e}'])
-    aux.check_msg(improv_report.get_string())
+    # signed mean improvements: negative values mean deterioration
+    avg_delta_MAE = jnp.mean(delta_MAE)
+    avg_delta_RMSE = jnp.mean(delta_RMSE)
+    delta_report = PrettyTable()
+    delta_report.title = 'MAP improvement over baseline'
+    delta_report.field_names = ['Metric', '% of probes improved', 'Mean improvement [EU]']
+    delta_report.add_row(['MAE', f'{100*N_delta_MAE:.2f}', f'{avg_delta_MAE:.3e}'])
+    delta_report.add_row(['RMSE', f'{100*N_delta_RMSE:.2f}', f'{avg_delta_RMSE:.3e}'])
+    aux.check_msg(delta_report.get_string())
+
+    # fraction of all observed space-time points with lower absolute error
+    pointwise_improvement = jnp.abs(err_baseline) - jnp.abs(err_MAP)
+    fraction_improved = jnp.mean(pointwise_improvement > 0)
+    aux.check_msg(f'MAP has lower absolute error at '
+                  f'{100*fraction_improved:.2f}% of experimental data points')
     
     if PLOT:
         fig = plt.imshow(jnp.abs(err_baseline)-jnp.abs(err_MAP), cmap='hot')
@@ -275,6 +264,83 @@ def _quadratic_form(x, A):
         # stable than calculating the inverse with jnp.inv(A)
         Q = 0.5 * x.T @ (jnp.linalg.solve(A, x))
     return Q
+
+
+def parametrise_beta(opts, x, t, STEADY):
+    
+    if opts['model'] in {'BxBt', 'BxBt_softplus', 'BxBt_exp'}:
+        # matrices containing
+        #   [B0(t0) ... B0(tN)]
+        #   [ ...   ...   ... ]
+        #   [Bn(t0) ... Bn(tN)]
+        # where t can be either time (for B_t) or space (for B_x)
+        print('Calculating basis function matrices...')
+        B_x = create_basis_functions_matrix(opts['N_basis_x'], x)
+        if not STEADY:
+            B_t = create_basis_functions_matrix(opts['N_basis_t'], t)
+        else:
+            # "identity matrix" with only 1 element
+            B_t = jnp.eye(1)
+        # same, but evaluated at interface nodes
+        # (N nodes => N-1 interfaces => N-1 interface nodes)
+        #x_interf = 0.5 * (x[:-1] + x[1:])
+        # specify the original domain mesh, so that its length is okay
+        #B_x_interf = create_basis_functions_matrix(opts['N_basis_x'], x_interf, domain=x)
+        N_params = B_x.shape[0] * B_t.shape[0]
+        print(f'Number of theta parameters to find: {N_params}')
+    
+    match opts['model']:
+        case 'BxBt':
+            beta = lambda theta: _beta_BxBt(theta, B_x, B_t, opts['beta_ref'])
+        case 'BxBt_softplus':
+            beta = lambda theta: _beta_BxBt_softplus(theta, B_x, B_t, opts['beta_min'])
+        case 'BxBt_exp':
+            beta = lambda theta: _beta_BxBt_exp(theta, B_x, B_t, opts['beta_ref'])
+        case _:
+            raise ValueError(f"Unknown beta model '{opts['model']}'")
+    
+    return beta, N_params
+
+
+def _beta_BxBt(theta_r, B_x, B_t, beta_ref):
+    beta_r = _beta_basis_functions(theta_r, B_x, B_t, beta_ref=beta_ref)
+    return beta_r
+
+def _beta_BxBt_softplus(theta_r, B_x, B_t, beta_min):
+    z = _beta_basis_functions(theta_r, B_x, B_t, beta_ref=0)
+    beta_r = beta_min + (1 - beta_min)*jax.nn.softplus(z)/jnp.log(2)
+    return beta_r
+
+def _beta_BxBt_exp(theta_r, B_x, B_t, beta_ref):
+    # beta = exp(z), with z = sum_mq Bm(x) theta_mq Bq(t)
+    z = _beta_basis_functions(theta_r, B_x, B_t, beta_ref=0)
+    beta_r = jnp.exp(z)
+    return beta_r
+
+
+def read_beta_options(input_data):
+    # DEFAULT VALUES
+    # used in beta = beta_ref + ...
+    beta_ref = 1
+    # used in beta = beta_min + (1-beta)*sofplus(...), so that beta > beta_min
+    beta_min = 1e-2
+    
+    beta_opts = {'beta_ref': beta_ref,
+                 'beta_min': beta_min
+                 }
+    # overwrite default values, if given
+    for key in beta_opts:
+        if key in input_data:
+            beta_opts[key] = input_data[key]
+    
+    beta_opts['model'] = input_data['beta_type']
+    match beta_opts['model']:
+        case 'BxBt' | 'BxBt_softplus' | 'BxBt_exp':
+            beta_opts['N_basis_x'] = int(input_data['num_basis_functions_x'])
+            beta_opts['N_basis_t'] = int(input_data['num_basis_functions_t'])
+        case _:
+            raise ValueError(f"Unknown beta model '{beta_opts['model']}'")
+    return beta_opts
 
 
 def launch_sampling(theta_samples, run_solver_case, solver_fun, N_x, N_t, N_samples, solver_args, sample_dir=None, RUN_PARALLEL=False, N_WORKERS=1):

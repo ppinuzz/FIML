@@ -192,7 +192,7 @@ def save_sampling(hdf5_file, group_name, opts, theta, sol, res, success, beta):
     tmp_set.attrs['description'] = ('If False, the k-th simulation did not converge or crashed')
     tmp_set = hdf5_group.create_dataset(name='beta', data=beta, **opts)
     tmp_set.attrs['description'] = ('Correction beta(x,y) with dimensione (Nx, Nt), '
-                                    'transpoded ordering w.r.t. solution variable')
+                                    'transposed ordering w.r.t. solution variable')
     # write to disk without closing the file
     print(f'Writing data to \n\t{Path(hdf5_file.filename).resolve()}')
     hdf5_file.flush()
