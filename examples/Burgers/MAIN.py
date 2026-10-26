@@ -14,6 +14,7 @@ import jax.numpy as jnp
 import cloudpickle
 import yaml
 import os
+import h5py
 
 from burgers import solve_Burgers
 FIML_pkg = Path(r'C:\Andrea\Dottorato\FIML')
@@ -57,47 +58,23 @@ if len(sys.argv) > 1:
                 raise ValueError('Unknown CLI input')
 else:
     # interactive execution from Spyder
-    ANALYSIS = False
-    POST_PROC = True
+    ANALYSIS = True
+    POST_PROC = False
     if ANALYSIS:
-        input_file = Path('test_input.yaml')
-        #output_file = Path('test_postproc.yaml')
+        input_file = Path('setup_FIML/BCDirichlet_steady_nu_u.yaml')
         output_file = None
     if POST_PROC:
         input_file = None
         output_file = Path('Burgers_post.yaml')
-        #output_file = Path('test_post.yaml')
 
 
-if input_file is None:
-    exact_sol_file = Path('solution/variable_nu.npz')
-    cfg_file = Path('solution/settings.npz')
-    exp_data_file = Path('probes/variable_nu.npz')
-    beta_exact_file = Path('solution/beta.npz')
-    
-    out_dir = Path('samples')
-    
-    N_basis_x = 5
-    N_basis_t = 7
-    sigma2_prior = 0.4
-    N_sampling_prior = 20
-    N_sampling_post = 20
-    sigma2_obs = 1e-2
-    
-    SEED = 123
-    RUN_PARALLEL = True
-    N_WORKERS = 4
-    CHECK = True
-    VIDEO = False
-    BATCH = False
-else:
+#%% UNPACK USER INPUT
+
+if ANALYSIS:
     with open(input_file, 'r') as file:
         input_data = yaml.safe_load(file)
-    exact_sol_file = Path(input_data['exact_sol_file'])
-    cfg_file = Path(input_data['problem_cfg_file'])
-    exp_data_file = Path(input_data['data_file'])
-    beta_exact_file = Path(input_data['exact_beta_file'])
-    
+    sol_file = Path(input_data['sol_file'])
+    probes_file = Path(input_data['data_file'])
     out_dir = Path(input_data['output_dir'])
     
     N_basis_x = int(input_data['num_basis_functions_x'])
@@ -114,8 +91,7 @@ else:
     VIDEO = input_data['show_videos']
     BATCH = input_data['batch_mode']
 
-
-if output_file is not None:
+if POST_PROC:
     with open(output_file, 'r') as file:
         output_data = yaml.safe_load(file)
     sol_file = Path(output_data['solution_file'])
@@ -127,22 +103,27 @@ if output_file is not None:
     cfg_file = Path(output_data['problem_cfg_file'])
 
 
-#%% ------------------ DO NOT TOUCH ANYTHING BELOW THIS LINE ------------------
+#%% REPACK DATA
 
-if ANALYSIS:
-    exp_data = jnp.load(exp_data_file)
-beta_exact = jnp.load(beta_exact_file)
-cfg = jnp.load(cfg_file)
-
-nu = cloudpickle.loads(cfg['nu'])
-mesh = {'x': cfg['x'], 
-        't': cfg['t']
-        }
-
-BC = {'u0': cfg['u0'], 
-      'uL': cfg['uL'], 
-      'u_IC': cloudpickle.loads(cfg['u_IC'])
-      }
+with h5py.File(probes_file, 'r') as file:
+    exp_data = {'x': jnp.asarray(file['probes']['x']),
+                't': jnp.asarray(file['probes']['t']),
+                'solution': jnp.asarray(file['exact']['solution'])
+                }
+with h5py.File(sol_file, 'r') as file:
+    mesh = {'x': jnp.asarray(file['mesh']['x']),
+            't': jnp.asarray(file['mesh']['t'])
+            }
+    BC = {'u0': jnp.asarray(file['settings']['u0']), 
+          'uL': jnp.asarray(file['settings']['uL']), 
+          # HDF5 dataset object -> NumPy array -> lambda function
+          'u_IC': cloudpickle.loads(jnp.asarray(file['settings']['u_IC']))
+          }
+    nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
+    if 'beta' in file.keys():
+        beta_exact = jnp.asarray(file['beta']['beta'])
+    else:
+        beta_exact = None
 
 
 if __name__ == '__main__':

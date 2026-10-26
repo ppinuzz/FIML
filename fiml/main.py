@@ -72,11 +72,6 @@ def analysis(exp_data, mesh, BC, nu, out_dir, N_basis_x, N_basis_t, sigma2_prior
         VIDEO = False
         PLOT = False
     
-    # INPUT CHECKS
-    exp_data = aux.check_file_or_data_input(exp_data, 'exp_data')
-    if beta_exact is not None:
-        beta_exact = aux.check_file_or_data_input(beta_exact, 'beta_exact')
-    
     # OUTPUT DATA FILE
     out_dir.mkdir(exist_ok=True)
     out_file = h5py.File(out_dir/'output.h5', 'w')

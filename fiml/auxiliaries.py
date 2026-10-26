@@ -45,19 +45,6 @@ def check_msg(message):
     print(Fore.CYAN + Style.BRIGHT + message + Style.RESET_ALL)
 
 
-def check_file_or_data_input(input_obj, paran_name):
-    # https://stackoverflow.com/a/76362264/17220538
-    if isinstance(input_obj, PathLike):
-        print(f'Reading {input_obj.resolve()}')
-        input_obj = jnp.load(input_obj)
-    elif isinstance(input_obj, dict) or isinstance(input_obj, np.lib.npyio.NpzFile):
-        pass
-    else:
-        raise ValueError(f"Invalid '{paran_name}' input: either pass a Path object to a .npz file "
-                         'or pass the dictionary/npz object obtained by loading')
-    return input_obj
-
-
 def check_optimiser_results(opt, SCIPY=True):
     success = True
     check_msg(f'Cost function value at MAP point     : {opt.fun}\n'
