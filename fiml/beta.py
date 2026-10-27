@@ -10,6 +10,7 @@ import jax
 # use float64, rather than float32
 jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
+import fiml.auxiliaries as aux
 
 
 def read_beta_options(input_data):
@@ -53,7 +54,7 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             #   [ ...   ...   ... ]
             #   [Bn(t0) ... Bn(tN)]
             # where t can be either time (for B_t) or space (for B_x)
-            print('Calculating basis function matrices...')
+            print('Calculating basis function matrices Bx(x) and Bt(t) ...')
             B_x = create_basis_functions_matrix(opts['N_basis_x'], x_mesh)
             if not STEADY:
                 B_t = create_basis_functions_matrix(opts['N_basis_t'], t_mesh)
@@ -66,12 +67,16 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             # specify the original domain mesh, so that its length is okay
             #B_x_interf = create_basis_functions_matrix(opts['N_basis_x'], x_interf, domain=x)
             N_params = B_x.shape[0] * B_t.shape[0]
-        case 'RBF_Gauss_x' | 'RBF_Gauss_u':
-            print('Calculating Gaussian radial basis functions matrix...')
+        case 'RBF_Gauss_x':
+            print('Calculating Gaussian radial basis functions matrix Phi(x)...')
             x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['N_RBF'])
             # j-th column is the vector of values of phi_j(x)
             Phi = jax.vmap(lambda xc: jnp.exp(-opts['K']*(x_mesh-xc)**2),
                            in_axes=0, out_axes=1)(x_c)
+            N_params = opts['N_RBF']
+        case 'RBF_Gauss_u':
+            print('Calculating Gaussian radial basis functions matrix Phi(u)...')
+            x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['N_RBF'])
             N_params = opts['N_RBF']
         case _:
             raise ValueError(f"Unknown beta model '{opts['model']}'")
@@ -80,13 +85,20 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
     # wrap each beta function
     match opts['model']:
         case 'BxBt':
-            beta = lambda theta, x=None, t=None, u=None: _beta_BxBt(theta, B_x, B_t, opts['beta_ref'])
+            beta = lambda theta, u=None, x=None, t=None: _beta_BxBt(
+                        theta, B_x, B_t, opts['beta_ref'])
         case 'BxBt_softplus':
-            beta = lambda theta, x=None, t=None, u=None: _beta_BxBt_softplus(theta, B_x, B_t, opts['beta_min'])
+            beta = lambda theta, u=None, x=None, t=None: _beta_BxBt_softplus(
+                        theta, B_x, B_t, opts['beta_min'])
         case 'BxBt_exp':
-            beta = lambda theta, x=None, t=None, u=None: _beta_BxBt_exp(theta, B_x, B_t, opts['beta_ref'])
+            beta = lambda theta, u=None, x=None, t=None: _beta_BxBt_exp(
+                        theta, B_x, B_t, opts['beta_ref'])
         case 'RBF_Gauss_x':
-            beta = lambda theta, x=None, t=None, u=None: _beta_RBF_Gauss_x(theta, Phi, t_mesh.size, opts['beta_ref'])
+            beta = lambda theta, u=None, x=None, t=None: _beta_RBF_Gauss_x(
+                        theta, Phi, t_mesh.size, opts['beta_ref'])
+        case 'RBF_Gauss_u':
+            beta = lambda theta, u=None, x=None, t=None: _beta_RBF_Gauss_u(
+                        theta, x_c, x_mesh, u, opts['beta_ref'], opts['K'])
         case _:
             raise ValueError(f"Unknown beta model '{opts['model']}'")
     
@@ -124,6 +136,33 @@ def _beta_RBF_Gauss_x(theta_r, Phi, N_t, beta_ref):
     # => this RBF is steady, manually add the "time dimension"
     beta_r = jnp.broadcast_to(beta_r[:,jnp.newaxis], (Phi.shape[0], N_t))
     return beta_r
+
+def _beta_RBF_Gauss_u(theta_r, x_c, x, u, beta_ref, K):
+    if u is None:
+        raise ValueError('RBF_Gauss_u requires the current solution in input')
+    # 3D matrix: (Nx, N_RBF, Nt)
+    # the k-th slice in 3rd direction is a 2D matrix where Phi_ij = phi_j(u_i)
+    Phi = _RBF_Gauss_u_Phi(x, x_c, u, K)
+    # sum over the RBF index:
+    #   beta(x,t,u) = beta(x,t,u(x,t)) = sum_k phi_k(u_k) w_k 
+    #               = sum_k  phi_k(u(x_k)) w_k
+    beta_r = beta_ref + jnp.einsum('ikt,k->it', Phi, theta_r)
+    return beta_r
+
+def _RBF_Gauss_u_Phi(x, x_c, u, K):
+    # interpolate solution at x_c to obtain u_c = u(x_c) => (Nt, N_RBF)
+    #   i-th row: [u(x_c1,t^k), u(x_c2,t^k), ..., u(x_cNx, t^k)]
+    u_c = aux.sample_solution(u, x_mesh=x, x_probes=x_c)
+    # 3D matrix: (Nx, N_RBF, Nt)
+    # the k-th slice in 3rd direction is a 2D matrix where Phi_ij = phi_j(u_i)
+    # u: (Nt, Nx)               => u.T: (Nx, Nt)
+    # u_c: (Nt, N_RBF)          => u_c.T: (N_RBF, Nt)
+    # Phi: (Nx, N_RBF, Nt)
+    # u.T: (Nx, Nt) => (Nx, 1, Nt) to have same ordering as Phi
+    # u_c.T: (N_RBF, Nt) => (1, N_RBF, Nt) to have same ordering as Phi
+    # add the missing axis, with size 1, as jnp.newaxis
+    Phi = jnp.exp(-K * (u.T[:,jnp.newaxis,:] - u_c.T[jnp.newaxis,:,:])**2)
+    return Phi
 
 
 # no need to JIT compile it, as this function is called only once during the
