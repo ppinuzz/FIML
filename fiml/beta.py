@@ -83,6 +83,7 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
     print(f'Number of theta parameters to identify: {N_params}')
     
     # wrap each beta function
+    DEPENDS_ON_U = False
     match opts['model']:
         case 'BxBt':
             beta = lambda theta, u=None, x=None, t=None: _beta_BxBt(
@@ -99,8 +100,13 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
         case 'RBF_Gauss_u':
             beta = lambda theta, u=None, x=None, t=None: _beta_RBF_Gauss_u(
                         theta, x_c, x_mesh, u, opts['beta_ref'], opts['K'])
+            DEPENDS_ON_U = True
         case _:
             raise ValueError(f"Unknown beta model '{opts['model']}'")
+    
+    # HACK: flag used to select the solver (GMRES is more expensive than the
+    # tridiagonal Jacobia of the original solver)
+    beta.depends_on_u = DEPENDS_ON_U
     
     return beta, N_params
 
