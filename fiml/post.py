@@ -50,12 +50,12 @@ def check_experiments_in_sigma_band(sol, exp, x, t, x_exp, t_exp, ax_sol=2,
     u_upper_probes = aux.sample_solution(u_upper, x_mesh=x, t_mesh=t, x_probes=x_exp, t_probes=t_exp)
     u_lower_probes = aux.sample_solution(u_lower, x_mesh=x, t_mesh=t, x_probes=x_exp, t_probes=t_exp)
     
-    lies_within = (exp < u_upper_probes) & (exp > u_lower_probes)
+    lies_within = (exp <= u_upper_probes) & (exp >= u_lower_probes)
     N_within_t = jnp.count_nonzero(lies_within[idx_plot_exp,:])
     N_probes = lies_within[idx_plot_exp,:].size
     fraction_within_t = N_within_t / N_probes
     aux.check_msg(f'{100*fraction_within_t:.2f}% ({N_within_t}/{N_probes}) of the '
-                  f'experimental data at time t = {t_plot:.5f} s '
+                  f'experimental data at time t = {t_exp_plot:.5f} s '
                   f'lie within +/- {N_sigma} standard deviations from the sample mean')
     fraction_within_total = jnp.count_nonzero(lies_within) / lies_within.size
     aux.check_msg(f'{100*fraction_within_total:.2f}% of the experimental data point (x,t) '
@@ -96,7 +96,7 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
     if t_plot is None:
         idx_plot_beta = -1
         aux.warning('No time instant given, the last instant '
-                    f't = {t_beta[idx_plot_exp]} s will be plotted...')
+                    f't = {t_beta[idx_plot_beta]} s will be plotted...')
     else:
         if t_plot < t_beta[0] or t_plot > t_beta[-1]:
             raise ValueError('Given time instant lies outside of the time range '
@@ -157,15 +157,15 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
     
     if VIDEO:
         fig, ax = plt.subplots()
-        line_num, = ax.plot(x, jnp.zeros_like(x), label=r'Calculated $\beta$')
-        line_exact, = ax.plot(x, jnp.zeros_like(x), label=r'Exact $\beta$')
+        line_num, = ax.plot(x_beta, jnp.zeros_like(x_beta), label=r'Calculated $\beta$')
+        line_exact, = ax.plot(x_beta, jnp.zeros_like(x_beta), label=r'Exact $\beta$')
         ax.legend(loc='upper right')
         ax.set_xlim(x[0], x[-1])
         ax.set_ylim(0, 2)
         # enable interactive mode
         plt.ion()
         plt.show(block=False)
-        for j in range(t.shape[0]):
+        for j in range(t_beta.shape[0]):
             # stop animation if the user closed the window
             if not plt.fignum_exists(fig.number):
                 break
@@ -212,37 +212,25 @@ def compare_prior_posterior(prior, posterior, exp, x, t, x_exp, t_exp, ax_sol=2,
                              f'Experimental range: {t_exp[0]}-{t_exp[-1]} s')
         # find experimental point closest to the given time instant
         idx_plot_exp = jnp.argmin(jnp.abs(t_exp - t_plot))
-    # interpolate numerical solution to the chosen experimental point 
-    # (do NOT interpolate experimental data, as that could be meaningless!)
+    # actual time instant plotted 
     t_exp_plot = t_exp[idx_plot_exp]
-# =============================================================================
-#     # interpolate numerical data at probe locations
-#     u_mean_prior_t = aux.sample_solution(u_upper_prior, x_mesh=x, t_mesh=t, 
-#                                          x_probes=x_exp, t_probes=t_exp)
-#     u_upper_prior_t = aux.sample_solution(u_upper_prior, x_mesh=x, t_mesh=t, 
-#                                           x_probes=x_exp, t_probes=t_exp)
-#     u_lower_prior_t = aux.sample_solution(u_lower_prior, x_mesh=x, t_mesh=t, 
-#                                           x_probes=x_exp, t_probes=t_exp)
-#     
-#     u_mean_post_t = aux.sample_solution(u_mean_post, x_mesh=x, t_mesh=t, 
-#                                         x_probes=x_exp, t_probes=t_exp)
-#     u_upper_post_t = aux.sample_solution(u_upper_post, x_mesh=x, t_mesh=t, 
-#                                          x_probes=x_exp, t_probes=t_exp)
-#     u_lower_post_t = aux.sample_solution(u_lower_post, x_mesh=x, t_mesh=t, 
-#                                          x_probes=x_exp, t_probes=t_exp)
-# =============================================================================
+    # interpolate numerical solution at that time instant
+    u_mean_prior_exp = aux.sample_solution(u_mean_prior, x_mesh=x, t_mesh=t, t_probes=t_exp_plot)
+    u_upper_prior_exp = aux.sample_solution(u_upper_prior, x_mesh=x, t_mesh=t, t_probes=t_exp_plot)
+    u_lower_prior_exp = aux.sample_solution(u_lower_prior, x_mesh=x, t_mesh=t, t_probes=t_exp_plot)
+    u_mean_post_exp = aux.sample_solution(u_mean_post, x_mesh=x, t_mesh=t, t_probes=t_exp_plot)
+    u_upper_post_exp = aux.sample_solution(u_upper_post, x_mesh=x, t_mesh=t, t_probes=t_exp_plot)
+    u_lower_post_exp = aux.sample_solution(u_lower_post, x_mesh=x, t_mesh=t, t_probes=t_exp_plot)
     
     if PLOT:
         fig = plt.figure()
-        plt.plot(x, u_mean_prior[idx_plot_exp,:], label='Prior', color='r')
-        plt.fill_between(x, u_upper_prior[idx_plot_exp,:], u_lower_prior[idx_plot_exp,:], 
-                         alpha=0.3, color='r')
+        plt.plot(x, u_mean_prior_exp, label='Prior', color='r')
+        plt.fill_between(x, u_upper_prior_exp, u_lower_prior_exp, alpha=0.3, color='r')
         #plt.plot(x, u_upper_prior[idx_plot_exp,:], color='r')
         #plt.plot(x, u_lower_prior[idx_plot_exp,:], color='r')
         
-        plt.plot(x, u_mean_post[idx_plot_exp,:], label='Posterior', color='b')
-        plt.fill_between(x, u_upper_post[idx_plot_exp,:], u_lower_post[idx_plot_exp,:], 
-                         alpha=0.3, color='b')
+        plt.plot(x, u_mean_post_exp, label='Posterior', color='b')
+        plt.fill_between(x, u_upper_post_exp, u_lower_post_exp, alpha=0.3, color='b')
         #plt.plot(x, u_upper_post[idx_plot_exp,:], color='b')
         #plt.plot(x, u_lower_post[idx_plot_exp,:], color='b')
         

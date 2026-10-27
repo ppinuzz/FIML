@@ -78,7 +78,7 @@ def _is_symmetric(A):
 
 def _is_positive_semi_definite(A, semidef=True):
     if semidef:
-        A_test = A + jnp.eye(A)*1e-14
+        A_test = A + jnp.eye(A.shape[0])*1e-14
     else:
         A_test = A
     # for REAL and SYMMETRIC matrices, Cholesky decomposition returns
@@ -96,31 +96,27 @@ def _is_positive_semi_definite(A, semidef=True):
 def check_covariance_matrix(Cm):
     Cm = jnp.squeeze(Cm)
     if Cm.ndim > 2:
-        raise ValueError('Invalid number of dimensions: covariance matrix can '
-                         'only be 0D, 1D (diagonal vector) or 2D')
-    # works for 0D, 1D, 2D
-    finite = jnp.all(jnp.isfinite(Cm))
-    if not finite:
+        raise ValueError('Covariance matrix can only be 0D, 1D (diagonal vector) or 2D')
+    
+    if not jnp.all(jnp.isfinite(Cm)):
         raise ValueError('Covariance matrix contains non-finite values')
     
     if Cm.ndim == 0 or Cm.ndim == 1:
         # matrix is only diagonal => diagonal elements are variances, not
         # covariances, therefore should all be > 0 strictly
         positive_semi_def = (Cm > 0)
-        symmetric = True
     else:
-        positive_semi_def = (jnp.diagonal(Cm) > 0)
     # full covariance matrix (not diagonal-only)
-    if Cm.ndim == 2:
-        # covariance matrix should be symmetric and semipositive-definite
+        # covariance matrix should be symmetric and (semi)positive-definite
         # https://www.statlect.com/fundamentals-of-probability/covariance-matrix
         symmetric = _is_symmetric(Cm)
         if not symmetric:
             raise ValueError('Covariance matrix is not symmetric')
         
-        positive_semi_def = _is_positive_semi_definite(Cm, semidef=True)
-        if not positive_semi_def:
-            raise ValueError('Covariance matrix is not positive semi-definite')
+        positive_semi_def = _is_positive_semi_definite(Cm, semidef=False)
+    
+    if not positive_semi_def:
+        raise ValueError('Covariance matrix is not positive semi-definite')
 
 
 def check_hessian(H):
@@ -164,6 +160,10 @@ def save_fig(fig, fig_name, fig_dir):
 def sample_solution(solution, x_mesh=None, t_mesh=None, x_probes=None, t_probes=None):
     space_given = x_mesh is not None and x_probes is not None
     time_given = t_mesh is not None and t_probes is not None
+    # x_probes and t_probes could be scalars => no dimension, jax.vmap will
+    # return a shape error => force them to be 1D array with 1 element only
+    x_probes = jnp.atleast_1d(x_probes)
+    t_probes = jnp.atleast_1d(t_probes)
     if space_given and time_given:
         sol_space = _sample_sol_space(solution, x_mesh, x_probes)
         sol_sampled = _sample_sol_time(sol_space, t_mesh, t_probes)
@@ -174,14 +174,15 @@ def sample_solution(solution, x_mesh=None, t_mesh=None, x_probes=None, t_probes=
     else:
         warning('Neither time nor space are fully provided (i.e. mesh values and sampling points), returning None...')
         sol_sampled = None
-    return sol_sampled
+    # remove possible 1-dimensions you might have introduced with atleast_1d
+    return jnp.squeeze(sol_sampled)
 
 
 def save_sampling(hdf5_file, group_name, opts, theta, sol, res, success, beta):
     hdf5_group = hdf5_file.create_group(group_name)
     tmp_set = hdf5_group.create_dataset(name='theta', data=theta, **opts)
     tmp_set.attrs['description'] = ('Each column is one drow and theta contains the '
-                                    f'{theta.shape[1]} parameters required to describe '
+                                    f'{theta.shape[0]} parameters required to describe '
                                     'fully the correction beta')
     tmp_set = hdf5_group.create_dataset(name='solution', data=sol, **opts)
     tmp_set.attrs['description'] = ('The i-th row is the solution on all the 1D mesh for the i-th '

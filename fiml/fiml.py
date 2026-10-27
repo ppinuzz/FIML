@@ -330,7 +330,7 @@ def read_beta_options(input_data):
                  }
     # overwrite default values, if given
     for key in beta_opts:
-        if key in input_data:
+        if key in input_data and input_data[key] is not None:
             beta_opts[key] = input_data[key]
     
     beta_opts['model'] = input_data['beta_type']

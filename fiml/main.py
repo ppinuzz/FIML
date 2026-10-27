@@ -7,13 +7,11 @@ Main functions of FIML methodology.
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
-from os import PathLike
 
 import jax
 # use float64, rather than float32
 jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
-import jax.random as jrn
 import scipy.optimize as sciopt
 import h5py
 
@@ -171,8 +169,9 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
                         f'T numerical: {T} s\n'
                         f'T experiment: {t_exp[-1]} s\n'
                         'Limiting experimental data to numerical simulation end time T = {T} s')
-            t_exp = t_exp[t_exp <= T]
-            sol_exp = sol_exp[t_exp<=T, :]
+            idx_valid = (t_exp <= T)
+            t_exp = t_exp[idx_valid]
+            sol_exp = sol_exp[idx_valid, :]
     
     
     #%% PARAMETRISE CORRECTION FUNCTION BETA
@@ -182,6 +181,8 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     
     #%% DRAW FROM PRIOR DISTRIBUTION
     
+    # check that covariance matrix is finite, symmetryc, positive semi-definite
+    aux.check_covariance_matrix(sigma2_prior)
     # beta = 1 + sum_mq theta_mq Bm(x) Bq(t)
     # beta_prior = 1 (no correction) means theta_prior = 0
     theta_prior = np.zeros(shape=(N_theta, ))

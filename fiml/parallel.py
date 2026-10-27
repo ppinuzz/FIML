@@ -52,7 +52,11 @@ def run_parallel(N_workers, theta, run_solver_case, solution, residuals, success
                 # => use sample_num, which should be equal
                 aux.warning(f'Job {sample_num} failed with error message: {exc.args[0]}')
             else:
-                print(f'Job {sample_num} completed successfully')
+                if status:
+                    print(f'Job {sample_num} completed successfully')
+                else:
+                    aux.warning(f'Job {sample_num} completed but did not converge/contains NaNs')
+                
     elapsed_time = perf_counter() - start_time
     print(f'Total parallel execution time: {elapsed_time:.3f} s')
     
