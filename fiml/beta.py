@@ -44,7 +44,7 @@ def read_beta_options(input_data):
     return beta_opts
 
 
-def parametrise_beta(opts, x, t, STEADY):
+def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
     # calculate parameters common to several models
     match opts['model']:
         case 'BxBt' | 'BxBt_softplus' | 'BxBt_exp':
@@ -54,9 +54,9 @@ def parametrise_beta(opts, x, t, STEADY):
             #   [Bn(t0) ... Bn(tN)]
             # where t can be either time (for B_t) or space (for B_x)
             print('Calculating basis function matrices...')
-            B_x = create_basis_functions_matrix(opts['N_basis_x'], x)
+            B_x = create_basis_functions_matrix(opts['N_basis_x'], x_mesh)
             if not STEADY:
-                B_t = create_basis_functions_matrix(opts['N_basis_t'], t)
+                B_t = create_basis_functions_matrix(opts['N_basis_t'], t_mesh)
             else:
                 # "identity matrix" with only 1 element
                 B_t = jnp.eye(1)
@@ -68,9 +68,9 @@ def parametrise_beta(opts, x, t, STEADY):
             N_params = B_x.shape[0] * B_t.shape[0]
         case 'RBF_Gauss_x' | 'RBF_Gauss_u':
             print('Calculating Gaussian radial basis functions matrix...')
-            x_c = jnp.linspace(x[0], x[-1], opts['N_RBF'])
+            x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['N_RBF'])
             # j-th column is the vector of values of phi_j(x)
-            Phi = jax.vmap(lambda xc: jnp.exp(-opts['K']*(x-xc)**2),
+            Phi = jax.vmap(lambda xc: jnp.exp(-opts['K']*(x_mesh-xc)**2),
                            in_axes=0, out_axes=1)(x_c)
             N_params = opts['N_RBF']
         case _:
@@ -80,13 +80,13 @@ def parametrise_beta(opts, x, t, STEADY):
     # wrap each beta function
     match opts['model']:
         case 'BxBt':
-            beta = lambda theta: _beta_BxBt(theta, B_x, B_t, opts['beta_ref'])
+            beta = lambda theta, x=None, t=None, u=None: _beta_BxBt(theta, B_x, B_t, opts['beta_ref'])
         case 'BxBt_softplus':
-            beta = lambda theta: _beta_BxBt_softplus(theta, B_x, B_t, opts['beta_min'])
+            beta = lambda theta, x=None, t=None, u=None: _beta_BxBt_softplus(theta, B_x, B_t, opts['beta_min'])
         case 'BxBt_exp':
-            beta = lambda theta: _beta_BxBt_exp(theta, B_x, B_t, opts['beta_ref'])
+            beta = lambda theta, x=None, t=None, u=None: _beta_BxBt_exp(theta, B_x, B_t, opts['beta_ref'])
         case 'RBF_Gauss_x':
-            beta = lambda theta: _beta_RBF_Gauss_x(theta, Phi, t.size, opts['beta_ref'])
+            beta = lambda theta, x=None, t=None, u=None: _beta_RBF_Gauss_x(theta, Phi, t_mesh.size, opts['beta_ref'])
         case _:
             raise ValueError(f"Unknown beta model '{opts['model']}'")
     
