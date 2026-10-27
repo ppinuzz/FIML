@@ -215,15 +215,21 @@ def save_sampling(hdf5_file, group_name, opts, theta, sol, res, success, beta,
 def _sample_sol_space(u, x_mesh, x_probes):
     # interpolate u(x, t=t^k) from mesh to probe locations
     interpolate = lambda u_t: jnp.interp(x_probes, x_mesh, u_t)
-    # apply it to all time instants
-    u_interp = jax.vmap(interpolate)(u)
+    if u.ndim == 1:
+        u_interp = interpolate(u)
+    else:
+        # apply it to all time instants
+        u_interp = jax.vmap(interpolate)(u)
     return u_interp
 
 
 def _sample_sol_time(u, t_mesh, t_probes):
     interpolate = lambda u: jnp.interp(t_probes, t_mesh, u)
-    # apply it to all time instants
-    u_interp = jax.vmap(interpolate, in_axes=1, out_axes=1)(u)
+    if u.ndim == 1:
+        u_interp = interpolate(u)
+    else:
+        # apply it to all time instants
+        u_interp = jax.vmap(interpolate, in_axes=1, out_axes=1)(u)
     return u_interp
 
 

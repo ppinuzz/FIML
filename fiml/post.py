@@ -10,7 +10,7 @@ jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import fiml.auxiliaries as aux
-from pathlib import Path
+from prettytable import PrettyTable
 
 
 def check_experiments_in_sigma_band(sol, exp, x, t, x_exp, t_exp, ax_sol=2, 
@@ -60,6 +60,20 @@ def check_experiments_in_sigma_band(sol, exp, x, t, x_exp, t_exp, ax_sol=2,
     fraction_within_total = jnp.count_nonzero(lies_within) / lies_within.size
     aux.check_msg(f'{100*fraction_within_total:.2f}% of the experimental data point (x,t) '
                   f'lie within +/- {N_sigma} standard deviations from the sample mean')
+    
+    # interpolate solution at t = t_plot on probe locations
+    u_mean_probes = aux.sample_solution(u_mean_t[idx_plot_exp,:], x_mesh=x, x_probes=x_exp)
+    delta_u = u_mean_probes - exp[idx_plot_exp,:]
+    err = delta_u / exp[idx_plot_exp,:]
+    
+    
+    err_report = PrettyTable()
+    err_report.title = f'Mean of the distribution vs Experimental data at t = {t_exp_plot:.5f} s'
+    err_report.field_names = ['x', 'Mean', 'Experiment', 'Difference', 'Relative error [%]']
+    for k in range(exp.shape[1]):
+        err_report.add_row([f'{x_exp[k]}', f'{u_mean_probes[k]}', f'{exp[idx_plot_exp,k]}',
+                            f'{delta_u[k]}', f'{100*err[k]:.2f}'])
+    aux.check_msg(err_report.get_string())
     
     if PLOT:
         # data are stored as [t^k, u_1^k, ..., u_N^k] => create a column vector of
