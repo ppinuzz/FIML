@@ -20,7 +20,11 @@ def read_beta_options(input_data):
     beta_min = 1e-2
     
     beta_opts = {'beta_ref': beta_ref,
-                 'beta_min': beta_min
+                 'beta_min': beta_min,
+                 # rule of thumb: around 10 RBF per dimension => MAX 20 RBFs
+                 'N_RBF': 15,
+                 # shape factor K in exp(-K*x^2)
+                 'shape_factor': 1
                  }
     # overwrite default values, if given
     for key in beta_opts:
@@ -32,13 +36,15 @@ def read_beta_options(input_data):
         case 'BxBt' | 'BxBt_softplus' | 'BxBt_exp':
             beta_opts['N_basis_x'] = int(input_data['num_basis_functions_x'])
             beta_opts['N_basis_t'] = int(input_data['num_basis_functions_t'])
+        case 'RBF_Gauss_x' | 'RBF_Gauss_u':
+            beta_opts['N_RBF'] = int(input_data['num_RBF'])
+            beta_opts['K'] = float(input_data['shape_factor'])
         case _:
             raise ValueError(f"Unknown beta model '{beta_opts['model']}'")
     return beta_opts
 
 
 def parametrise_beta(opts, x, t, STEADY):
-    
     # calculate parameters common to several models
     match opts['model']:
         case 'BxBt' | 'BxBt_softplus' | 'BxBt_exp':
@@ -60,12 +66,16 @@ def parametrise_beta(opts, x, t, STEADY):
             # specify the original domain mesh, so that its length is okay
             #B_x_interf = create_basis_functions_matrix(opts['N_basis_x'], x_interf, domain=x)
             N_params = B_x.shape[0] * B_t.shape[0]
-            print(f'Number of theta parameters to find: {N_params}')
         case 'RBF_Gauss_x' | 'RBF_Gauss_u':
-            x_c = jnp.linspace(x[0], x[-1], )
-            pass
+            print('Calculating Gaussian radial basis functions matrix...')
+            x_c = jnp.linspace(x[0], x[-1], opts['N_RBF'])
+            # j-th column is the vector of values of phi_j(x)
+            Phi = jax.vmap(lambda xc: jnp.exp(-opts['K']*(x-xc)**2),
+                           in_axes=0, out_axes=1)(x_c)
+            N_params = opts['N_RBF']
         case _:
             raise ValueError(f"Unknown beta model '{opts['model']}'")
+    print(f'Number of theta parameters to identify: {N_params}')
     
     # wrap each beta function
     match opts['model']:
@@ -75,13 +85,15 @@ def parametrise_beta(opts, x, t, STEADY):
             beta = lambda theta: _beta_BxBt_softplus(theta, B_x, B_t, opts['beta_min'])
         case 'BxBt_exp':
             beta = lambda theta: _beta_BxBt_exp(theta, B_x, B_t, opts['beta_ref'])
+        case 'RBF_Gauss_x':
+            beta = lambda theta: _beta_RBF_Gauss_x(theta, Phi, t.size, opts['beta_ref'])
         case _:
             raise ValueError(f"Unknown beta model '{opts['model']}'")
     
     return beta, N_params
 
 
-def _beta_basis_functions(theta_r, B_x, B_t, beta_ref=1):    
+def _beta_BxBt(theta_r, B_x, B_t, beta_ref):    
     N_basis_x = B_x.shape[0]
     N_basis_t = B_t.shape[0]
     # theta = vector of vectors 
@@ -95,19 +107,22 @@ def _beta_basis_functions(theta_r, B_x, B_t, beta_ref=1):
     beta_r = beta_ref + B_x.T @ Theta_r @ B_t
     return beta_r
 
-def _beta_BxBt(theta_r, B_x, B_t, beta_ref):
-    beta_r = _beta_basis_functions(theta_r, B_x, B_t, beta_ref=beta_ref)
-    return beta_r
-
 def _beta_BxBt_softplus(theta_r, B_x, B_t, beta_min):
-    z = _beta_basis_functions(theta_r, B_x, B_t, beta_ref=0)
+    z = _beta_BxBt(theta_r, B_x, B_t, beta_ref=0)
     beta_r = beta_min + (1 - beta_min)*jax.nn.softplus(z)/jnp.log(2)
     return beta_r
 
 def _beta_BxBt_exp(theta_r, B_x, B_t, beta_ref):
     # beta = exp(z), with z = sum_mq Bm(x) theta_mq Bq(t)
-    z = _beta_basis_functions(theta_r, B_x, B_t, beta_ref=0)
+    z = _beta_BxBt(theta_r, B_x, B_t, beta_ref=0)
     beta_r = jnp.exp(z)
+    return beta_r
+
+def _beta_RBF_Gauss_x(theta_r, Phi, N_t, beta_ref):
+    beta_r = beta_ref + Phi @ theta_r
+    # to keep it consistent with the unsteady case, beta must be (Nx, Nt)
+    # => this RBF is steady, manually add the "time dimension"
+    beta_r = jnp.broadcast_to(beta_r[:,jnp.newaxis], (Phi.shape[0], N_t))
     return beta_r
 
 
