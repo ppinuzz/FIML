@@ -18,6 +18,7 @@ import h5py
 import fiml.fiml as fiml
 import fiml.auxiliaries as aux
 import fiml.post as post
+import fiml.beta as betamod
 
 
 def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh, 
@@ -176,7 +177,7 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     
     #%% PARAMETRISE CORRECTION FUNCTION BETA
     
-    beta_fun, N_theta = fiml.parametrise_beta(beta_opts, x_mesh, t_mesh, STEADY)
+    beta_fun, N_theta = betamod.parametrise_beta(beta_opts, x_mesh, t_mesh, STEADY)
     
     
     #%% DRAW FROM PRIOR DISTRIBUTION

@@ -77,7 +77,7 @@ if ANALYSIS:
     probes_file = Path(input_data['data_file'])
     out_dir = Path(input_data['output_dir'])
     
-    beta_opts = fiml.fiml.read_beta_options(input_data)
+    beta_opts = fiml.beta.read_beta_options(input_data)
     
     sigma2_prior = float(input_data['variance_prior'])
     N_sampling_prior = int(input_data['num_samples_prior'])
