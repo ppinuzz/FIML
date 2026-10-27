@@ -203,7 +203,7 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     beta_corrected = jax.vmap(beta_fun, in_axes=1, out_axes=2)(theta_prior_samples)
     aux.save_sampling(out_file, 'prior', comprex_opts, theta_prior_samples, 
                       solution_corrected, max_res_corrected, success_corrected,
-                      beta_corrected)
+                      beta_corrected, jax.random.key_data(key_random))
     
     solution_corrected, max_res_corrected = fiml.handle_failed_runs(
                                                 (solution_corrected, max_res_corrected), 
@@ -332,7 +332,7 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     
     aux.save_sampling(out_file, 'posterior', comprex_opts, theta_post_samples, 
                       solution_posterior, max_res_posterior, success_posterior,
-                      beta_posterior)
+                      beta_posterior, jax.random.key_data(key_random))
     
     solution_posterior, max_res_posterior = fiml.handle_failed_runs(
                                                 (solution_posterior, max_res_posterior), 
