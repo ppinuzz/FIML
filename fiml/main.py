@@ -24,15 +24,24 @@ import fiml.beta as betamod
 def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh, 
                     u_IC, u0, uL, STEADY, out_dir, TOL=1e-5, PRINT_ERR_MSG=True):
     
-    beta_r = beta_fun(theta_r)
-    
     # apply ICs and BCs + solve corrected Burgers' eq.
     solution = jnp.zeros(shape=(t_mesh.size, x_mesh.size))
     if not STEADY:
         solution = solution.at[0,:].set(u_IC)
     solution = solution.at[:,0].set(u0)
     solution = solution.at[:,-1].set(uL)
-    solution, max_res = solver_fun(solution, x_mesh, t_mesh, nu, beta=beta_r, WRITE_LOG=False, tol=TOL, STEADY=STEADY)
+    if getattr(beta_fun, 'depends_on_u', False):
+        # Pass the correction callable and theta to the fully coupled solver.
+        # beta will be reevaluated from the current u inside each Newton step.
+        solution, max_res = solver_fun(
+            solution, x_mesh, t_mesh, nu, beta=beta_fun, theta=theta_r,
+            WRITE_LOG=False, tol=TOL, STEADY=STEADY)
+    else:
+        # Keep the original interface for existing solvers and beta models.
+        beta_r = beta_fun(theta_r)
+        solution, max_res = solver_fun(
+            solution, x_mesh, t_mesh, nu, beta=beta_r,
+            WRITE_LOG=False, tol=TOL, STEADY=STEADY)
     
     # check if solver didn't converge or produced NaN's/Inf's
     not_converged = (max_res > TOL)
@@ -200,7 +209,9 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     solution_corrected, max_res_corrected, success_corrected = fiml.launch_sampling(theta_prior_samples, run_solver_case, solver_fun, N_x, N_t, 
                     N_sampling_prior, (beta_fun, nu, x_mesh, t_mesh, u_IC, u0, uL, STEADY), RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
     
-    beta_corrected = jax.vmap(beta_fun, in_axes=1, out_axes=2)(theta_prior_samples)
+    beta_corrected = jax.vmap(
+        lambda theta, u: beta_fun(theta, u=u), in_axes=(1, 2), out_axes=2
+    )(theta_prior_samples, solution_corrected)
     aux.save_sampling(out_file, 'prior', comprex_opts, theta_prior_samples, 
                       solution_corrected, max_res_corrected, success_corrected,
                       beta_corrected, jax.random.key_data(key_random))
@@ -289,7 +300,7 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     _, sol_MAP, max_res_MAP, success_MAP = run_solver_case(None, theta_MAP, solver_fun, 
                                             beta_fun, nu, x_mesh, t_mesh,
                                             u_IC, u0, uL, STEADY, out_dir=None)
-    beta_r = beta_fun(theta_MAP)
+    beta_r = beta_fun(theta_MAP, u=sol_MAP)
     
     
     if CHECK and beta_exact is not None:
@@ -328,7 +339,9 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     
     solution_posterior, max_res_posterior, success_posterior = fiml.launch_sampling(theta_post_samples, run_solver_case, solver_fun, N_x, N_t, 
                     N_sampling_post, (beta_fun, nu, x_mesh, t_mesh, u_IC, u0, uL, STEADY), RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
-    beta_posterior = jax.vmap(beta_fun, in_axes=1, out_axes=2)(theta_post_samples)
+    beta_posterior = jax.vmap(
+        lambda theta, u: beta_fun(theta, u=u), in_axes=(1, 2), out_axes=2
+    )(theta_post_samples, solution_posterior)
     
     aux.save_sampling(out_file, 'posterior', comprex_opts, theta_post_samples, 
                       solution_posterior, max_res_posterior, success_posterior,

@@ -71,8 +71,9 @@ def check_experiments_in_sigma_band(sol, exp, x, t, x_exp, t_exp, ax_sol=2,
     err_report.title = f'Mean of the distribution vs Experimental data at t = {t_exp_plot:.5f} s'
     err_report.field_names = ['x', 'Mean', 'Experiment', 'Difference', 'Relative error [%]']
     for k in range(exp.shape[1]):
-        err_report.add_row([f'{x_exp[k]}', f'{u_mean_probes[k]}', f'{exp[idx_plot_exp,k]}',
-                            f'{delta_u[k]}', f'{100*err[k]:.2f}'])
+        err_report.add_row([f'{x_exp[k]:.5f}', f'{u_mean_probes[k]:.5f}',
+                            f'{exp[idx_plot_exp,k]:.5f}', f'{delta_u[k]:.5f}', 
+                            f'{100*err[k]:.2f}'])
     aux.check_msg(err_report.get_string())
     
     if PLOT:

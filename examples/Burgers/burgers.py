@@ -142,13 +142,38 @@ def newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu, beta_t):
     #   JdU_fun     => a function f(x) representing J(U)*x ("product-by-J" function)
     u_int = u[1:-1]
     res_int, JdU_fun = jax.linearize(F, u_int)
+    # reconstruct the jacobian matrix using JACOBIAN COLOURING
+    lower_diag_jac, main_diag_jac, upper_diag_jac = _jacobian_colouring_tridiag(JdU_fun, u_int.size)
+    # Newton's method: J(x^n)(x_n+1 - x_n) = -F(x_n)
+    # (NB: res_int is (N,), but matrix product requires (N,1))
+    delta = jax.lax.linalg.tridiagonal_solve(
+                lower_diag_jac, main_diag_jac, upper_diag_jac, -res_int[:,jnp.newaxis])
+    # delta is returned with the same shape as -F(x_n), i.e. (N,1) => remove 1
+    delta = jnp.squeeze(delta)
+    # [1:-1] since 1st and last nodes are not solved for
+    u_new = u.at[1:-1].add(delta)
+    error = jnp.max(jnp.abs(residual(u_new, u_old, x_mesh, t, dt, nu, beta_t)))
 
+    return u_new, error
+
+
+def _beta_from_solution(beta, theta, u, t):
+    """Evaluate a solution-dependent beta on one time slice (Nx,)."""
+    # beta(theta, u) taken u with shape (Nt, Nx) and returns the full correction
+    # field (Nx, Nt) => Newton solves one instant at a time, pass only the slice
+    # at the required time instant
+    # => add a fake "time dimension" to u(x, t^k), so that it's read as (1,Nx)
+    # and returns beta as (Nx,1)
+    beta_t = beta(theta, u=u[jnp.newaxis, :], t=t)
+    return jnp.reshape(beta_t, u.shape)
+
+
+def _jacobian_colouring_tridiag(JdU_fun, N):
     # reconstruct the jacobian matrix using JACOBIAN COLOURING
     # *) jax.jacfwd(F)(u_int) creates the full NxN jacobian => too slow
     # *) since J is tridiagonal if nu(x, t, u, u_x) using this discretisation, 
     # extract all the non-zero elements in J(U) by multiplying J(U) with 
     # ones-and-zeros vectors chosen on purpose
-    N = u_int.size
     i = jnp.arange(N)
     # 3xN matrix, where each row is a vector composed with
     #   row 1) 1st, 4th, 7th, ecc. element non-zero
@@ -162,26 +187,97 @@ def newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu, beta_t):
     # apply f(x) function to each column of the seeds matrix
     J_elems = jax.vmap(JdU_fun)(seeds)
     # extract jacobina diagonals and residuals vector
-    lower_diag_jac = J_elems[(i - 1)%3, i].at[0].set(0.0)
-    main_diag_jac = J_elems[i % 3, i]
-    upper_diag_jac = J_elems[(i + 1)%3, i].at[-1].set(0.0)
-    # Newton's method: J(x^n)(x_n+1 - x_n) = -F(x_n)
-    # (NB: res_int is (N,), but matrix product requires (N,1))
-    delta = jax.lax.linalg.tridiagonal_solve(
-                lower_diag_jac, main_diag_jac, upper_diag_jac, -res_int[:,jnp.newaxis])
-    # delta is returned with the same shape as -F(x_n), i.e. (N,1) => remove 1
-    delta = jnp.squeeze(delta)
-    # [1:-1] since 1st and last nodes are not solved for
-    u_new = u.at[1:-1].add(delta)
-    error = jnp.max(jnp.abs(residual(u_new, u_old, x_mesh, t, dt, nu, beta_t)))
+    lower_diag = J_elems[(i - 1)%3, i].at[0].set(0.0)
+    main_diag = J_elems[i % 3, i]
+    upper_diag = J_elems[(i + 1)%3, i].at[-1].set(0.0)
+    return lower_diag, main_diag, upper_diag
 
+
+@partial(jax.jit, static_argnames=('nu', 'beta_fun', 'GMRES_RESTART'))
+def newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
+                              TOL=1e-8, GMRES_RESTART=30, MAX_ITER=10, TOL_RES=1e-6):
+    """Newton step for solution-dependent beta(theta, u)"""
+
+    # Original Newton: J(u^k, beta(x,t))(u^k+1 - u_k) = -F(u^k, beta(x,t))
+    # Now: J(u^k, beta(x,t,u))(u^k+1 - u_k) = -F(u^k, beta(x,t,u))
+    # where F(u) = du/dt + u du/dx - d(beta(x,t,u)*nu0*du/dx)/dx is the residual
+    # => now J containes a term due to beta: DF/Du = dF/du + dF/dbeta dbeta/du
+    # (D = total derivative, d = partial derivative):
+    #   dF/du @ fixed beta  => the only term present also in the previous version
+    #   dF/dbeta dbeta/du   => correction term
+    #   *) dF/du is tridiagonale if nu = nu(x,t,u,ux) => can be constructed
+    # using Jacobian colouring
+    #   the correction is not => non-tridiagonal Jacobian
+
+    u_int = u[1:-1]
+    # residual take a beta at a fixed t=t^k => use a wapper to have F at the
+    # correct time instant (and thus beta) for the differentiation operator
+    def F(U):
+        # 1st and last point are fixed by Dirichlet BCs => keep those constant
+        u_full = u.at[1:-1].set(U)
+        beta_t = _beta_from_solution(beta_fun, theta, u_full, t)
+        return residual(u_full, u_old, x_mesh, t, dt, nu, beta_t)[1:-1]
+
+    # Jacobian-vector product: J*u, obtained by linearising F = F0 + dF/du * du
+    # (NB: F(u) is the residual function R(u)) 
+    res_int, JdU_fun_int = jax.linearize(F, u_int)
+
+    # GMRES can be preconditioned with a matrix close to J^-1, so that
+    #   P^-1*J*du = -P^-1*F(u) is approximately I*du = -P^-1*F(u)
+    # => use dF/dbeta as P, since it approximates J 
+    # => calculate the Jacobian forcing JAX to consider beta as fixed
+    beta_t_frozen = jax.lax.stop_gradient(_beta_from_solution(beta_fun, theta, u, t))
+    F_frozen = lambda U: residual(u.at[1:-1].set(U), u_old, x_mesh, t, dt, nu, 
+                                  beta_t_frozen)[1:-1]
+    _, JdU_fun_frozen = jax.linearize(F_frozen, u_int)
+    # reconstruct Jacobian matrix using jacobian colouring
+    lower_diag_jac, main_diag_jac, upper_diag_jac = _jacobian_colouring_tridiag(JdU_fun_frozen, u_int.size)
+    # to solve  P^-1*J*du = -P^-1*F(u), do not calculate P^-1 explicitly:
+    # create a function applying the left preconditioning to a vector, returning
+    # the product of P^-1*vector
+    def apply_preconditioner(v):
+        # RHS of the equation P^-1*v should have at least dimension (N,1)
+        # => add the "1" dimension with jnp.newaxis
+        y = jax.lax.linalg.tridiagonal_solve(
+                lower_diag_jac, main_diag_jac, upper_diag_jac, v[:,jnp.newaxis])
+        # make sure that the output vector has the same shape as the input vector
+        # (e.g. (N,) rather than (N,1), if the input has shape (N,))
+        y = jnp.reshape(y, v.shape)
+        return y
+
+    delta, _ = jax.scipy.sparse.linalg.gmres(JdU_fun_int, -res_int, M=apply_preconditioner,
+                                             tol=TOL, atol=0.0, restart=GMRES_RESTART,
+                                             maxiter=MAX_ITER)
+    # check residuals of the linear system J*du = -res
+    res_lin_sys = JdU_fun_int(delta) + res_int
+    if jnp.linalg.norm(res_lin_sys) > TOL_RES:
+        warning(f'GMRES linear system residual {jnp.linalg.norm(res_lin_sys):.5e} '
+                f'exceeds linear system tolerance {TOL_RES:.5e}')
+    print(jnp.linalg.norm(res_lin_sys))
+    # 1st and last nodes are set by BCs
+    u_new = u.at[1:-1].add(delta)
+    beta_new = _beta_from_solution(beta_fun, theta, u_new, t)
+    error = jnp.max(
+                jnp.abs(
+                    residual(u_new, u_old, x_mesh, t,dt, nu, beta_new)
+                    )
+                )
+    
     return u_new, error
+
 
 # NB: since tol and k_max are NOT static, they can be changed without having 
 # to recompile the function
-@partial(jax.jit, static_argnames=('nu', ))
-def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max):
-    """Compiled Newton and time loops, viscosity must NOT depend on u_xx"""
+@partial(jax.jit, static_argnames=('nu', 'beta_fun', 'GMRES_RESTART'))
+def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max,
+                     theta=None, beta_fun=None, GMRES_TOL=1e-8,
+                     GMRES_RESTART=30, GMRES_MAX_ITER=10):
+    """
+    Compiled Newton and time loops, viscosity must NOT depend on u_xx. 
+    Beta correction can be a function of x, t, u. If beta = beta(x,t) only, a
+    specific solver version is compiled (tridiagonal Jacobian, much faster than
+    the GMRES solution for the u-dependent beta).
+    """
     if t_mesh.size > 1:
         dt = t_mesh[1] - t_mesh[0]
         # loop through time starting from t[idx_time]
@@ -193,7 +289,7 @@ def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max):
         dt = None
 
     def advance_time_step(u_old, inputs):
-        time, u0, uL, beta_t = inputs
+        idx_t, time, u0, uL = inputs
         # enforce BCs
         u = u_old.at[0].set(u0)
         u = u.at[-1].set(uL)
@@ -206,7 +302,17 @@ def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max):
 
         def update_newton(state):
             u, _, iteration = state
-            u, err = newton_step_tridiagonal(u, u_old, x_mesh, time, dt, nu, beta_t)
+            if beta_fun is None:
+                # beta = beta(x,t) => no need to calculate it at runtime
+                beta_t = beta[:,idx_t]
+                u, err = newton_step_tridiagonal(u, u_old, x_mesh, time, dt, nu, beta_t)
+            else:
+                # beta = beta(..., u) => recalculated at each step
+                u, err = newton_step_beta_u(u, u_old, x_mesh, time, dt, nu,
+                                            beta_fun, theta,
+                                            TOL=GMRES_TOL, 
+                                            GMRES_RESTART=GMRES_RESTART, 
+                                            MAX_ITER=GMRES_MAX_ITER)
             return u, err, iteration + 1
 
         # as long as continue_newton() returns True, execute update_newton()
@@ -231,23 +337,43 @@ def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max):
         recorded_out = (u, err, iteration)
         return u, recorded_out
 
+# =============================================================================
+#     # equivalent to
+#     #   U = sol[0,:]
+#     #   history_output = []
+#     #   for t_i, u0, uL, beta_t in zip(t_mesh[1:], sol[1:, 0], sol[1:, -1], beta[:,1:]):
+#     #       U, output_iter = advance_time_step(U, (t_i, u0, uL, beta_t))
+#     #       history_output.append(output_iter)
+#     #   return U, np.vstack(history_output)
+#     # NB: beta_ij = beta(x_i, t^j) => looping through time, use the transpose
+#     # so that the loop selects the j-th column (looping works row-wise, not
+#     # column-wise)
+#     _, (u_sol, errors, iters) = jax.lax.scan(advance_time_step,
+#                                              # initial carry value: u(x,0)
+#                                              sol[0, :],
+#                                              # thing to loop over
+#                                              (t_mesh[idx_time:], sol[idx_time:,0], sol[idx_time:,-1], beta[:,idx_time:].T)
+#     )
+# =============================================================================
     # equivalent to
     #   U = sol[0,:]
     #   history_output = []
-    #   for t_i, u0, uL, beta_t in zip(t_mesh[1:], sol[1:, 0], sol[1:, -1], beta[:,1:]):
-    #       U, output_iter = advance_time_step(U, (t_i, u0, uL, beta_t))
+    #   idx_time_instants = jnp.arange(idx_time, t_mesh.size)
+    #   for t_i, u0, uL, beta_t in zip(idx_time_instants, t_mesh[1:], sol[1:, 0], sol[1:, -1]):
+    #       U, output_iter = advance_time_step(U, (idx_time_i, t_i, u0, uL))
     #       history_output.append(output_iter)
     #   return U, np.vstack(history_output)
-    # NB: beta_ij = beta(x_i, t^j) => looping through time, use the transpose
-    # so that the loop selects the j-th column (looping works row-wise, not
-    # column-wise)
+    # using the time index to retrieve the correct beta when/if needed
+    # (if beta = beta(u), it's not used and beta is calculated at runtime)
     _, (u_sol, errors, iters) = jax.lax.scan(advance_time_step,
                                              # initial carry value: u(x,0)
                                              sol[0, :],
                                              # thing to loop over
-                                             (t_mesh[idx_time:], sol[idx_time:,0], sol[idx_time:,-1], beta[:,idx_time:].T)
-    )
-
+                                             (jnp.arange(idx_time, t_mesh.size),
+                                                  t_mesh[idx_time:],
+                                                  sol[idx_time:, 0],
+                                                  sol[idx_time:, -1])
+                                             )
     if dt is None:
         # if problem is steady, sol[0] contains the initial guess, not the 
         # analytically exact IC
@@ -260,7 +386,8 @@ def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max):
 
 
 def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRITE_LOG=True,
-                  STEADY=False):
+                  STEADY=False, theta=None, GMRES_TOL=1e-8, GMRES_RESTART=30,
+                  GMRES_MAX_ITER=10):
     if x_mesh.size < 4:
         raise ValueError('At least 4 spatial nodes are required')
     if STEADY and t_mesh.size != 1:
@@ -276,10 +403,29 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRIT
     if sol.shape != (t_mesh.size, x_mesh.size):
         raise ValueError('sol must have shape (len(t_mesh), len(x_mesh))')
     
+    # beta can be 
+    #   - beta(x,t) => calculated beforehand and passed as a (Nx, Nt) matrix
+    #   - beta(..., u) => passed as a function => it's callable then!
+    beta_depends_on_u = callable(beta)
+    # if it's None (e.g. when solving the exact Burgers' equation for the
+    # numerical experiment), set it to 1 everywhere
     if beta is None:
-        beta = jnp.ones_like(sol.T)
+        beta_values = jnp.ones_like(sol.T)
+        beta_fun = None
+        theta_values = None
+    # if given, it can either be a matrix or a function
+    elif beta_depends_on_u:
+        beta_fun = jnp.asarray(beta)
+        beta_values = None
+        if theta is None:
+            raise ValueError('theta must be supplied when beta is callable')
+        theta_values = jnp.asarray(theta)
     else:
-        beta = jnp.asarray(beta)
+        if beta.shape != (x_mesh.size, t_mesh.size):
+            raise ValueError('Fixed beta must have shape (Nx, Nt)')
+        beta_fun = None
+        beta_values = jnp.asarray(beta)
+        theta_values = None
 
     if STEADY:
         # using u = 0 everywhere as initial guess when u0 != 0 (or uL != 0) can
@@ -289,7 +435,13 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRIT
                     'boundary conditions...')
         sol = sol.at[0,:].set(jnp.linspace(sol[0,0], sol[0,-1], x_mesh.size))
 
-    sol, max_res, iterations = _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max)
+    sol, max_res, iterations = _solve_all_steps(sol, x_mesh, t_mesh, nu, 
+                                                beta_values, tol, k_max,
+                                                theta=theta_values,
+                                                beta_fun=beta_fun,
+                                                GMRES_TOL=GMRES_TOL,
+                                                GMRES_RESTART=GMRES_RESTART,
+                                                GMRES_MAX_ITER=GMRES_MAX_ITER)
 
     if WRITE_LOG:
         solver_table = PrettyTable()
