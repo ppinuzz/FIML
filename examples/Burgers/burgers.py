@@ -312,7 +312,8 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRIT
     jax.lax.cond(jnp.any(failed), 
                  # jax.debug.print() replaces print() in JIT-compiled functions
                  lambda _: jax.debug.print(
-                         f'WARNING: {jnp.count_nonzero(failed)} time steps did not converge'),
+                         'WARNING: {N} time steps did not converge',
+                         N=jnp.count_nonzero(failed)),
                  lambda _: None,
                  operand=None
                  )

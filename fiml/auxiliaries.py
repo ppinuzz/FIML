@@ -162,8 +162,14 @@ def sample_solution(solution, x_mesh=None, t_mesh=None, x_probes=None, t_probes=
     time_given = t_mesh is not None and t_probes is not None
     # x_probes and t_probes could be scalars => no dimension, jax.vmap will
     # return a shape error => force them to be 1D array with 1 element only
-    x_probes = jnp.atleast_1d(x_probes)
-    t_probes = jnp.atleast_1d(t_probes)
+    scalar_x = False
+    scalar_t = False
+    if space_given:
+        scalar_x = True if (jnp.ndim(x_probes)==0) else False
+        x_probes = jnp.atleast_1d(x_probes)
+    if time_given:
+        scalar_t = True if (jnp.ndim(t_probes)==0) else False
+        t_probes = jnp.atleast_1d(t_probes)
     if space_given and time_given:
         sol_space = _sample_sol_space(solution, x_mesh, x_probes)
         sol_sampled = _sample_sol_time(sol_space, t_mesh, t_probes)
@@ -174,8 +180,12 @@ def sample_solution(solution, x_mesh=None, t_mesh=None, x_probes=None, t_probes=
     else:
         warning('Neither time nor space are fully provided (i.e. mesh values and sampling points), returning None...')
         sol_sampled = None
-    # remove possible 1-dimensions you might have introduced with atleast_1d
-    return jnp.squeeze(sol_sampled)
+    # remove only the dimensions introduced for scalar coordinates
+    if scalar_t:
+        sol_sampled = sol_sampled[0,:]
+    if scalar_x:
+        sol_sampled = sol_sampled[...,0]
+    return sol_sampled
 
 
 def save_sampling(hdf5_file, group_name, opts, theta, sol, res, success, beta):
