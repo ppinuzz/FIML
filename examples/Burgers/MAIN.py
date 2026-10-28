@@ -46,7 +46,7 @@ if len(sys.argv) > 1:
                 output_file = Path(os.getcwd()) / sys.argv[j+1]
                 # skip filename, so that next loop will read the next flag
                 j += 2
-                POST_PROC = False
+                POST_PROC = True
                 input_file = None
             case '--help' | '-h':
                 print('Possible flags: \n'
@@ -106,28 +106,29 @@ if POST_PROC:
 
 #%% REPACK DATA
 
-with h5py.File(probes_file, 'r') as file:
-    exp_data = {'x': jnp.asarray(file['probes']['x']),
-                't': jnp.asarray(file['probes']['t']),
-                'solution': jnp.asarray(file['exact']['solution'])
+if ANALYSIS:
+    with h5py.File(probes_file, 'r') as file:
+        exp_data = {'x': jnp.asarray(file['probes']['x']),
+                    't': jnp.asarray(file['probes']['t']),
+                    'solution': jnp.asarray(file['exact']['solution'])
+                    }
+    with h5py.File(sol_file, 'r') as file:
+        mesh = {'x': jnp.asarray(file['mesh']['x']),
+                't': jnp.asarray(file['mesh']['t'])
                 }
-with h5py.File(sol_file, 'r') as file:
-    mesh = {'x': jnp.asarray(file['mesh']['x']),
-            't': jnp.asarray(file['mesh']['t'])
-            }
-    BC = {'u0': jnp.asarray(file['settings']['u0']), 
-          'uL': jnp.asarray(file['settings']['uL']), 
-          # HDF5 dataset object -> NumPy array -> lambda function
-          'u_IC': cloudpickle.loads(jnp.asarray(file['settings']['u_IC']))
-          }
-    nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
-    if 'beta' in file.keys():
-        beta_exact = {'x': jnp.asarray(file['mesh']['x']),
-                      't': jnp.asarray(file['mesh']['t']),
-                      'beta': jnp.asarray(file['beta']['beta'])
-                      }
-    else:
-        beta_exact = None
+        BC = {'u0': jnp.asarray(file['settings']['u0']), 
+              'uL': jnp.asarray(file['settings']['uL']), 
+              # HDF5 dataset object -> NumPy array -> lambda function
+              'u_IC': cloudpickle.loads(jnp.asarray(file['settings']['u_IC']))
+              }
+        nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
+        if 'beta' in file.keys():
+            beta_exact = {'x': jnp.asarray(file['mesh']['x']),
+                          't': jnp.asarray(file['mesh']['t']),
+                          'beta': jnp.asarray(file['beta']['beta'])
+                          }
+        else:
+            beta_exact = None
 
 
 if __name__ == '__main__':
