@@ -30,21 +30,24 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
         solution = solution.at[0,:].set(u_IC)
     solution = solution.at[:,0].set(u0)
     solution = solution.at[:,-1].set(uL)
+    # getattr(beta_fun, 'depends_on_u') will crash if the attribute is not
+    # present => supply False as default value
     if getattr(beta_fun, 'depends_on_u', False):
-        # Pass the correction callable and theta to the fully coupled solver.
-        # beta will be reevaluated from the current u inside each Newton step.
-        solution, max_res = solver_fun(
-            solution, x_mesh, t_mesh, nu, beta=beta_fun, theta=theta_r,
-            WRITE_LOG=False, tol=TOL, STEADY=STEADY)
+        # beta = beta(..., u) => pass the callable beta_fun() to the solver
+        # => this will trigger the solver into using a different internal
+        # function, since the Jacobian is no more tridiagonal
+        solution, max_res = solver_fun(solution, x_mesh, t_mesh, nu, 
+                                       beta=beta_fun, theta=theta_r,
+                                       WRITE_LOG=False, tol=TOL, STEADY=STEADY)
     else:
-        # Keep the original interface for existing solvers and beta models.
+        # beta = beta(x,t) can be calculated beforehand and doesn't depend on
+        # the solution => can choose a faster solver with a tridiag. Jacobian
         beta_r = beta_fun(theta_r)
-        solution, max_res = solver_fun(
-            solution, x_mesh, t_mesh, nu, beta=beta_r,
-            WRITE_LOG=False, tol=TOL, STEADY=STEADY)
+        solution, max_res = solver_fun(solution, x_mesh, t_mesh, nu, beta=beta_r,
+                                       WRITE_LOG=False, tol=TOL, STEADY=STEADY)
     
     # check if solver didn't converge or produced NaN's/Inf's
-    not_converged = (max_res > TOL)
+    not_converged = (max_res >= TOL)
     nan_inf_values = jnp.any(~jnp.isfinite(solution), axis=1) | ~jnp.isfinite(max_res)
     # jax.lax.cond() replaces if (...) when the object is a JAX object in a JIT
     # compiled function
@@ -178,7 +181,7 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
             aux.warning('Numerical simulation is shorter than the experimental data: \n'
                         f'T numerical: {T} s\n'
                         f'T experiment: {t_exp[-1]} s\n'
-                        'Limiting experimental data to numerical simulation end time T = {T} s')
+                        f'Limiting experimental data to numerical simulation end time T = {T} s')
             idx_valid = (t_exp <= T)
             t_exp = t_exp[idx_valid]
             sol_exp = sol_exp[idx_valid, :]
@@ -209,9 +212,15 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     solution_corrected, max_res_corrected, success_corrected = fiml.launch_sampling(theta_prior_samples, run_solver_case, solver_fun, N_x, N_t, 
                     N_sampling_prior, (beta_fun, nu, x_mesh, t_mesh, u_IC, u0, uL, STEADY), RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
     
-    beta_corrected = jax.vmap(
-        lambda theta, u: beta_fun(theta, u=u), in_axes=(1, 2), out_axes=2
-    )(theta_prior_samples, solution_corrected)
+    beta_corrected = jax.vmap(lambda theta, u: beta_fun(theta, u=u),
+                              # theta is a row vector of columns => pick one column
+                              # of theta at a time => index 1
+                              # u is ordered as a (Nx, Nt, N_samples) matrix =>
+                              # calculate beta for each sample solution => index 2
+                              in_axes=(1, 2),
+                              # store results in the 3rd dimension, "one per layer"
+                              out_axes=2
+                              )(theta_prior_samples, solution_corrected)
     aux.save_sampling(out_file, 'prior', comprex_opts, theta_prior_samples, 
                       solution_corrected, max_res_corrected, success_corrected,
                       beta_corrected, jax.random.key_data(key_random))
@@ -339,9 +348,9 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     
     solution_posterior, max_res_posterior, success_posterior = fiml.launch_sampling(theta_post_samples, run_solver_case, solver_fun, N_x, N_t, 
                     N_sampling_post, (beta_fun, nu, x_mesh, t_mesh, u_IC, u0, uL, STEADY), RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
-    beta_posterior = jax.vmap(
-        lambda theta, u: beta_fun(theta, u=u), in_axes=(1, 2), out_axes=2
-    )(theta_post_samples, solution_posterior)
+    beta_posterior = jax.vmap(lambda theta, u: beta_fun(theta, u=u), 
+                              in_axes=(1, 2), out_axes=2
+                              )(theta_post_samples, solution_posterior)
     
     aux.save_sampling(out_file, 'posterior', comprex_opts, theta_post_samples, 
                       solution_posterior, max_res_posterior, success_posterior,

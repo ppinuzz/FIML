@@ -195,7 +195,7 @@ def _jacobian_colouring_tridiag(JdU_fun, N):
 
 @partial(jax.jit, static_argnames=('nu', 'beta_fun', 'GMRES_RESTART'))
 def newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
-                              TOL=1e-8, GMRES_RESTART=30, MAX_ITER=10, TOL_RES=1e-6):
+                              TOL=1e-6, GMRES_RESTART=30, MAX_ITER=10):
     """Newton step for solution-dependent beta(theta, u)"""
 
     # Original Newton: J(u^k, beta(x,t))(u^k+1 - u_k) = -F(u^k, beta(x,t))
@@ -250,10 +250,18 @@ def newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
                                              maxiter=MAX_ITER)
     # check residuals of the linear system J*du = -res
     res_lin_sys = JdU_fun_int(delta) + res_int
-    if jnp.linalg.norm(res_lin_sys) > TOL_RES:
-        warning(f'GMRES linear system residual {jnp.linalg.norm(res_lin_sys):.5e} '
-                f'exceeds linear system tolerance {TOL_RES:.5e}')
-    print(jnp.linalg.norm(res_lin_sys))
+    # if the residual is 0, relative error is 0/0 => use max(|res|, 1e-30)
+    err_rel_lin_sys = jnp.linalg.norm(res_lin_sys) / jnp.maximum(jnp.linalg.norm(res_int), 1e-30)
+    iter_okay = jnp.isfinite(err_rel_lin_sys) & (err_rel_lin_sys < TOL)
+    jax.lax.cond(~iter_okay,
+                 lambda _: jax.debug.print('WARNING: GMRES relative residual {res:.5e} '
+                                           'exceeds tolerance {tol:.5e}',
+                                           res=err_rel_lin_sys,
+                                           tol=TOL
+                                           ),
+                 lambda _: None,
+                 operand=None
+                 )
     # 1st and last nodes are set by BCs
     u_new = u.at[1:-1].add(delta)
     beta_new = _beta_from_solution(beta_fun, theta, u_new, t)
@@ -270,7 +278,7 @@ def newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
 # to recompile the function
 @partial(jax.jit, static_argnames=('nu', 'beta_fun', 'GMRES_RESTART'))
 def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max,
-                     theta=None, beta_fun=None, GMRES_TOL=1e-8,
+                     theta=None, beta_fun=None, GMRES_TOL=1e-6,
                      GMRES_RESTART=30, GMRES_MAX_ITER=10):
     """
     Compiled Newton and time loops, viscosity must NOT depend on u_xx. 
@@ -386,7 +394,7 @@ def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max,
 
 
 def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRITE_LOG=True,
-                  STEADY=False, theta=None, GMRES_TOL=1e-8, GMRES_RESTART=30,
+                  STEADY=False, theta=None, GMRES_TOL=1e-6, GMRES_RESTART=30,
                   GMRES_MAX_ITER=10):
     if x_mesh.size < 4:
         raise ValueError('At least 4 spatial nodes are required')
@@ -415,16 +423,16 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRIT
         theta_values = None
     # if given, it can either be a matrix or a function
     elif beta_depends_on_u:
-        beta_fun = jnp.asarray(beta)
+        beta_fun = beta
         beta_values = None
         if theta is None:
             raise ValueError('theta must be supplied when beta is callable')
         theta_values = jnp.asarray(theta)
     else:
+        beta_values = jnp.asarray(beta)
         if beta.shape != (x_mesh.size, t_mesh.size):
             raise ValueError('Fixed beta must have shape (Nx, Nt)')
         beta_fun = None
-        beta_values = jnp.asarray(beta)
         theta_values = None
 
     if STEADY:

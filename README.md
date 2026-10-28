@@ -10,7 +10,7 @@ pip install -U jax
 ```
 
 ## $\beta$ model available
-- `BxBt`: space- and time-only basis functions, 
+- `BxBt`: space- and time-only basis functions
 ```math
 \beta(x,t) = \beta_\mathrm{ref} + \sum_{m=1}^M \sum_{q=1}^Q B_x^m(x) \theta_{mq} B_t^q(t) = \beta_\mathrm{ref} + z(x,t) \gtreqless 0
 ```
@@ -28,11 +28,21 @@ where $0 \le \beta_\mathrm{min} 1 1$ is a minimum value that can be imposed. Wit
 
 - `RBF_Gauss_x`: Gaussian RBFs (for steady problems)
 ```math
-\beta(x) = \sum_{k=1}^W \phi_k(x) w_k = \sum_{k=1}^W \exp(-K(x-c_k)^2) w_k \gtreqless 0
+\beta(x) = \beta_\mathrm{ref} + \sum_{k=1}^W \phi_k(x) w_k = \sum_{k=1}^W \exp(-K(x-c_k)^2) w_k \gtreqless 0
 ```
 
 - `RBF_Gauss_u`: same, but depending on the solution $u$, not on the independent coordinate $x$
 ```math
-\beta(u) = \sum_{k=1}^W \phi_k(u) w_k = \sum_{k=1}^W \exp(-K(u-u_{\mathrm{c},k})^2) w_k \gtreqless 0
+\beta(u) = \beta_\mathrm{ref} + \sum_{k=1}^W \phi_k(u) w_k = \sum_{k=1}^W \exp(-K(u-u_{\mathrm{c},k})^2) w_k \gtreqless 0
 ```
 the centre of each RBF is the solution at a fixed space position: $u_{\mathrm{c},k} = u(x_k)$
+
+- `RBF_Gauss_x_softplus`: same as `RBF_Gauss_x`, but the softplus function $S(z)$ is applied to the $\beta$ obtained by `RBF_Gauss_x`
+```math
+\beta(x) = S\bigg(\sum_{k=1}^W \phi_k(x) w_k = \sum_{k=1}^W \exp(-K(x-c_k)^2) w_k \bigg) > 0
+```
+
+- `RBF_Gauss_u_softplus`: same as `RBF_Gauss_u`, but the softplus function $S(z)$ is applied to the $\beta$ obtained by `RBF_Gauss_u`
+```math
+\beta(x) = S\bigg(\sum_{k=1}^W \phi_k(u) w_k = \sum_{k=1}^W \exp(-K(u-u_{\mathrm{c},k})^2) w_k \bigg) > 0
+```

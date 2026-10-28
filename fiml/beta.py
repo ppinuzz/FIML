@@ -22,8 +22,6 @@ def read_beta_options(input_data):
     
     beta_opts = {'beta_ref': beta_ref,
                  'beta_min': beta_min,
-                 # rule of thumb: around 10 RBF per dimension => MAX 20 RBFs
-                 'N_RBF': 15,
                  # shape factor K in exp(-K*x^2)
                  'shape_factor': 1
                  }
@@ -37,9 +35,9 @@ def read_beta_options(input_data):
         case 'BxBt' | 'BxBt_softplus' | 'BxBt_exp':
             beta_opts['N_basis_x'] = int(input_data['num_basis_functions_x'])
             beta_opts['N_basis_t'] = int(input_data['num_basis_functions_t'])
-        case 'RBF_Gauss_x' | 'RBF_Gauss_u':
-            beta_opts['N_RBF'] = int(input_data['num_RBF'])
-            beta_opts['K'] = float(input_data['shape_factor'])
+        case 'RBF_Gauss_x' | 'RBF_Gauss_u' | 'RBF_Gauss_x_softplus' | 'RBF_Gauss_u_softplus':
+            # rule of thumb: around 10 RBF per dimension => MAX 20 RBFs
+            beta_opts['num_RBF'] = int(input_data['num_RBF'])
         case _:
             raise ValueError(f"Unknown beta model '{beta_opts['model']}'")
     return beta_opts
@@ -67,17 +65,17 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             # specify the original domain mesh, so that its length is okay
             #B_x_interf = create_basis_functions_matrix(opts['N_basis_x'], x_interf, domain=x)
             N_params = B_x.shape[0] * B_t.shape[0]
-        case 'RBF_Gauss_x':
+        case 'RBF_Gauss_x' | 'RBF_Gauss_x_softplus':
             print('Calculating Gaussian radial basis functions matrix Phi(x)...')
-            x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['N_RBF'])
+            x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['num_RBF'])
             # j-th column is the vector of values of phi_j(x)
-            Phi = jax.vmap(lambda xc: jnp.exp(-opts['K']*(x_mesh-xc)**2),
+            Phi = jax.vmap(lambda xc: jnp.exp(-opts['shape_factor']*(x_mesh-xc)**2),
                            in_axes=0, out_axes=1)(x_c)
-            N_params = opts['N_RBF']
-        case 'RBF_Gauss_u':
+            N_params = opts['num_RBF']
+        case 'RBF_Gauss_u' | 'RBF_Gauss_u_softplus':
             print('Calculating Gaussian radial basis functions matrix Phi(u)...')
-            x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['N_RBF'])
-            N_params = opts['N_RBF']
+            x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['num_RBF'])
+            N_params = opts['num_RBF']
         case _:
             raise ValueError(f"Unknown beta model '{opts['model']}'")
     print(f'Number of theta parameters to identify: {N_params}')
@@ -99,7 +97,15 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
                         theta, Phi, t_mesh.size, opts['beta_ref'])
         case 'RBF_Gauss_u':
             beta = lambda theta, u=None, x=None, t=None: _beta_RBF_Gauss_u(
-                        theta, x_c, x_mesh, u, opts['beta_ref'], opts['K'])
+                        theta, x_c, x_mesh, u, opts['beta_ref'], opts['shape_factor'])
+            DEPENDS_ON_U = True
+        case 'RBF_Gauss_x_softplus':
+            beta = lambda theta, u=None, x=None, t=None: _beta_RBG_Gauss_x_softplus(
+                        theta, Phi, t_mesh.size, opts['beta_ref'], opts['beta_min'])
+        case 'RBF_Gauss_u_softplus':
+            beta = lambda theta, u=None, x=None, t=None: _beta_RBG_Gauss_u_softplus(
+                        theta, x_c, x_mesh, u, opts['beta_ref'], 
+                        opts['shape_factor'], opts['beta_min'])
             DEPENDS_ON_U = True
         case _:
             raise ValueError(f"Unknown beta model '{opts['model']}'")
@@ -127,7 +133,7 @@ def _beta_BxBt(theta_r, B_x, B_t, beta_ref):
 
 def _beta_BxBt_softplus(theta_r, B_x, B_t, beta_min):
     z = _beta_BxBt(theta_r, B_x, B_t, beta_ref=0)
-    beta_r = beta_min + (1 - beta_min)*jax.nn.softplus(z)/jnp.log(2)
+    beta_r = _sofplus_positivity_preserving(z, beta_min)
     return beta_r
 
 def _beta_BxBt_exp(theta_r, B_x, B_t, beta_ref):
@@ -169,6 +175,20 @@ def _RBF_Gauss_u_Phi(x, x_c, u, K):
     # add the missing axis, with size 1, as jnp.newaxis
     Phi = jnp.exp(-K * (u.T[:,jnp.newaxis,:] - u_c.T[jnp.newaxis,:,:])**2)
     return Phi
+
+def _beta_RBG_Gauss_x_softplus(theta_r, Phi, N_t, beta_ref, beta_min):
+    z = _beta_RBF_Gauss_x(theta_r, Phi, N_t, beta_ref=0)
+    beta_r = _sofplus_positivity_preserving(z, beta_min)
+    return beta_r
+
+def _beta_RBG_Gauss_u_softplus(theta_r, x_c, x, u, beta_ref, K, beta_min):
+    z = _beta_RBF_Gauss_u(theta_r, x_c, x, u, beta_ref=0, K=K)
+    beta_r = _sofplus_positivity_preserving(z, beta_min)
+    return beta_r
+
+def _sofplus_positivity_preserving(z, beta_min):
+    beta = beta_min + (1 - beta_min)*jax.nn.softplus(z)/jnp.log(2)
+    return beta
 
 
 # no need to JIT compile it, as this function is called only once during the

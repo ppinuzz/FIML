@@ -104,7 +104,7 @@ def check_covariance_matrix(Cm):
     if Cm.ndim == 0 or Cm.ndim == 1:
         # matrix is only diagonal => diagonal elements are variances, not
         # covariances, therefore should all be > 0 strictly
-        positive_semi_def = (Cm > 0)
+        positive_semi_def = jnp.all(Cm > 0)
     else:
     # full covariance matrix (not diagonal-only)
         # covariance matrix should be symmetric and (semi)positive-definite
@@ -116,7 +116,7 @@ def check_covariance_matrix(Cm):
         positive_semi_def = _is_positive_semi_definite(Cm, semidef=False)
     
     if not positive_semi_def:
-        raise ValueError('Covariance matrix is not positive semi-definite')
+        raise ValueError('Covariance matrix is not positive definite')
 
 
 def check_hessian(H):
