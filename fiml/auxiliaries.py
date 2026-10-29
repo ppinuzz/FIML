@@ -243,3 +243,15 @@ def generate_key(seed):
         seed_new = seed
     key_random = jrn.key(seed_new)
     return key_random
+
+
+def load_dataset(h5_file_ptr, group_name='/'):
+    # NB: the root group name is '/'
+    data = {}
+    for key, dataset in h5_file_ptr[group_name].items():
+        # dataset       h5py.Dataset object, vanishes once file is closed
+        # dataset[:]    numpy.ndarray, read the entire array, breaks if the
+        #               data stored in dataset[key] is a scalar 
+        # dataset[()]   numpy.ndarray or scalar, read whatever's in the database
+        data[key] = dataset[()]
+    return data

@@ -65,7 +65,7 @@ else:
         output_file = None
     if POST_PROC:
         input_file = None
-        output_file = Path('Burgers_post.yaml')
+        output_file = Path('setup_FIML/Burgers_post.yaml')
 
 
 #%% UNPACK USER INPUT
@@ -96,13 +96,12 @@ if ANALYSIS:
 if POST_PROC:
     with open(output_file, 'r') as file:
         output_data = yaml.safe_load(file)
-    sol_file = Path(output_data['solution_file'])
+    FIML_file = Path(output_data['FIML_file'])
+    probes_file = Path(output_data['data_file'])
+    
+    beta_exact_file = Path(output_data['exact_solution_file'])
     
     post_dir = Path(output_data['output_dir'])
-    
-    exp_data_file = Path(output_data['data_file'])
-    beta_exact_file = Path(output_data['exact_beta_file'])
-    cfg_file = Path(output_data['problem_cfg_file'])
 
 
 #%% REPACK DATA
@@ -131,10 +130,20 @@ if ANALYSIS:
         else:
             beta_exact = None
 
+if POST_PROC:
+    with h5py.File(beta_exact_file, 'r') as file:
+        if 'beta' in file.keys():
+            beta_exact = {'x': jnp.asarray(file['mesh']['x']),
+                          't': jnp.asarray(file['mesh']['t']),
+                          'beta': jnp.asarray(file['beta']['beta'])
+                          }
+        else:
+            beta_exact = None
+
 
 if __name__ == '__main__':
     if POST_PROC:
-        fiml.main.postprocessing(sol_file, exp_data_file, post_dir, beta_exact=beta_exact)
+        fiml.main.postprocessing(FIML_file, probes_file, post_dir, beta_exact=beta_exact)
     if ANALYSIS:
         fiml.main.analysis(exp_data, mesh, BC, nu, out_dir, beta_opts,
                        sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,

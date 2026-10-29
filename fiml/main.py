@@ -415,28 +415,24 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
         plt.show(block=True)
 
 
+#%% POSTPROCESSING
+
 def postprocessing(sol_file, exp_file, out_dir, beta_exact=None):
     sol_file = Path(sol_file)
-    print(f'Reading numerical solution from \n\t{sol_file.resolve()}')
+    print(f'Reading FIML solution from \n\t{sol_file.resolve()}')
     # https://stackoverflow.com/a/41586571/17220538
-    sol_file_ptr = h5py.File(sol_file, 'r')
-    print('Available groups (left) and their datasets (right): ')
-    for group_name, group in sol_file_ptr.items():
-        print('\t', group_name, list(group.keys()))
-    prior_data = sol_file_ptr['prior']
-    posterior_data = sol_file_ptr['posterior']
-    mesh = sol_file_ptr['mesh']
+    with h5py.File(sol_file, 'r') as file:
+        print('Available groups (left) and their datasets (right): ')
+        for group_name, group in file.items():
+            print('\t', group_name, '\t', list(group.keys()))
+        prior_data = aux.load_dataset(file, 'prior')
+        posterior_data = aux.load_dataset(file, 'posterior')
+        mesh = aux.load_dataset(file, 'mesh')
     
     exp_file = Path(exp_file)
     print(f'Reading experimental data from \n\t{exp_file.resolve()}')
-    if exp_file.suffix == '.npz':
-        exp_data = jnp.load(exp_file)
-    elif exp_file.suffix == '.h5':
-        # https://stackoverflow.com/a/41586571/17220538
-        exp_data = h5py.File(exp_file, 'r')
-        print(f'Available datasets: {list(exp_data.keys())}')
-    else:
-        raise ValueError('Unknown experimental data file format {exp_file.suffix}')
+    with h5py.File(exp_file, 'r') as file:
+        exp_data = aux.load_dataset(file)
     
     # check where experimental data lie within the +/- 2 sigma band around the
     # sample mean value, for both the prior and the posterior
