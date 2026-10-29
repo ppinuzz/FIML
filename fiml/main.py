@@ -207,7 +207,8 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     
     #%% PARAMETRISE CORRECTION FUNCTION BETA
     
-    beta_fun, N_theta = betamod.parametrise_beta(beta_opts, x_mesh, t_mesh, STEADY)
+    beta_fun, beta_params = betamod.parametrise_beta(beta_opts, x_mesh, t_mesh, STEADY)
+    N_theta = beta_params['N_params']
     
     
     #%% DRAW FROM PRIOR DISTRIBUTION
@@ -430,13 +431,13 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     # => block the last one, so that the user can inspect them before closing 
     # them and allowing the function to return
     if PLOT:
-        aux.warning('Close all figures to finish the execution')
+        aux.warning('Close all figures to terminate the execution')
         plt.show(block=True)
 
 
 #%% POSTPROCESSING
 
-def postprocessing(sol_file, exp_file, out_dir, beta_exact=None):
+def postprocessing(sol_file, exp_file, out_dir, beta_exact=None, sol_exact=None):
     sol_file = Path(sol_file)
     print(f'Reading FIML solution from \n\t{sol_file.resolve()}')
     # https://stackoverflow.com/a/41586571/17220538
@@ -448,6 +449,7 @@ def postprocessing(sol_file, exp_file, out_dir, beta_exact=None):
         posterior_data = aux.load_dataset(file, 'posterior')
         MAP_data = aux.load_dataset(file, 'MAP')
         mesh = aux.load_dataset(file, 'mesh')
+        input_data = aux.load_dataset(file, 'input_data')
     
     exp_file = Path(exp_file)
     print(f'Reading experimental data from \n\t{exp_file.resolve()}')
@@ -480,8 +482,11 @@ def postprocessing(sol_file, exp_file, out_dir, beta_exact=None):
                                 )
     
     # check if the parametrisation is able to reproduce the exact beta
-    
+    if beta_exact is not None and sol_exact is not None:
+        beta_opts = betamod.read_beta_options(input_data)
+        post.check_parametrisation_fitness(sol_exact, beta_exact['beta'], beta_opts,
+                                           fig_file=out_dir/'checkBetaParam')
     
     # keep the terminal on hold to avoid closing figures immediately
-    aux.warning('Close all figures to finish the execution')
+    aux.warning('Close all figures to terminate the execution')
     plt.show(block=True)

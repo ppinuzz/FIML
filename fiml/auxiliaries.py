@@ -258,12 +258,21 @@ def generate_key(seed):
 def load_dataset(h5_file_ptr, group_name='/'):
     # NB: the root group name is '/'
     data = {}
-    for key, dataset in h5_file_ptr[group_name].items():
-        # dataset       h5py.Dataset object, vanishes once file is closed
-        # dataset[:]    numpy.ndarray, read the entire array, breaks if the
-        #               data stored in dataset[key] is a scalar 
-        # dataset[()]   numpy.ndarray or scalar, read whatever's in the database
-        data[key] = dataset[()]
+    for key, obj in h5_file_ptr[group_name].items():
+        if isinstance(obj, h5py.Group):
+            data[key] = load_dataset(h5_file_ptr, group_name=obj.name)
+        else:
+            # obj       h5py.Dataset object, vanishes once file is closed
+            # obj[:]    numpy.ndarray, read the entire array, breaks if the
+            #               data stored in dataset[key] is a scalar 
+            # obj[()]   numpy.ndarray or scalar, read whatever's in the database
+            item = obj[()]
+            if isinstance(item, h5py.Empty):
+                item = None
+            elif isinstance(item, bytes):
+                # strings stored as b'my string' => turned into actual string
+                item = item.decode('utf-8')
+            data[key] = item
     return data
 
 

@@ -10,6 +10,7 @@ jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import fiml.auxiliaries as aux
+import fiml.beta as betamod
 from prettytable import PrettyTable
 
 
@@ -300,37 +301,74 @@ def compare_prior_posterior(prior, posterior, exp, x, t, x_exp, t_exp, ax_sol=2,
             aux.save_fig(fig, fig_file.name, fig_file.parent)
 
 
-def check_parametrisation_fitness(beta, B_x, B_t, BETA_MIN=1e-2):
-    # beta = F(Bx^T * Theta * Bt), where
-    #   F(z) = BETA_MIN + (1 - BETA_MIN)/ln(2) * softplus(z)
-    #   z = Bx^T * Theta * Bt
-    # the unknown is Theta (Bx and Bt are fixed) => invert F(z) to obtain Theta
-    w = (beta - BETA_MIN) * jnp.log(2) / (1 - BETA_MIN)
-    z_exact = jnp.log(jnp.expm1(w))
+def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_file=None):
+    
+    if sol_exact['t'].size == 1:
+        STEADY = True
+        idx_time = -1
+    else:
+        STEADY = False
+        aux.warning('Unsteady data, but not time instant provided: will plot the last one...')
+        idx_time = -1
+    # signature: beta(theta, u=None, x=None, t=None)
+    beta_fun, beta_params = betamod.parametrise_beta(opts, sol_exact['x'], 
+                                                     sol_exact['t'], STEADY)
+    
+    # z here is always obtained using a matrix-vector product, and therefore
+    # has a LINEAR relationship
+    if 'softplus' in opts['model']:
+        # softplus models:
+        #   beta = beta_min + (1-beta_min)*softplus(z)/ln(2)
+        z_exact = betamod._invert_softplus(beta_exact, opts['beta_min'])
+    elif 'exp' in opts['model']:
+        # exp models:
+        #   beta = e^z
+        z_exact = jnp.log(beta_exact)
+    else:
+        raise ValueError('At the moment, only models with softplus function can be checked')
+    
+    match opts['model']:
+        case 'BxBt' | 'BxBt_softplus' | 'BxBt_exp':
+            # least squares problem: 35 unknowns Theta_ij and Nx*Nt data available
+            #   z = Bx^T * Theta * Bt
+            # written using the pseudoinverse (?) as
+            #   Bx * z * Bt^T = (BxBx^T) * Theta * (BtBt^T)
+            # split into 2 equations:
+            #   1) (BxBx^T) * W = Bx * z * Bt^T   => solve for W
+            #   2) X = Theta * (BtBt^T), rewritten as 
+            #       (BtBt^T)^T Theta^T = W^T
+            #       BtBt^T Theta^T = W^T
+            Bxx = beta_params['B_x'] @ beta_params['B_x'].T
+            Btt = beta_params['B_t'] @ beta_params['B_t'].T
+            W = jnp.linalg.solve(Bxx, beta_params['B_x'] @ z_exact @ beta_params['B_t'].T)
+            Theta = jnp.linalg.solve(Btt, W.T).T
+            # rewrite the matrix as a vector of parameters, as required by
+            # the beta(theta, ...) function
+            # Theta is a row vector of column vectors => unravel in column-major
+            # order (Fortran-style)
+            theta = jnp.ravel(Theta, order='F')
+        case 'RBF_Gauss_x' | 'RBF_Gauss_x_softplus':
+            # z = Phi * theta, with Phi = (Nx, N_theta)
+            # the k-th row of z is the z vector for the k-th time instant
+            # => transpose it to have it as (Nx, 1), rather than (1, Nx)
+            theta = jnp.linalg.lstsq(beta_params['Phi'], z_exact.T)[0]
+            # theta: (N_theta, 1) -> (N_theta, )
+            theta = jnp.ravel(theta)
+        case _:
+            raise ValueError(f"Unknown beta model '{opts['model']}'")
 
-    # least squares problem: 35 unknowns Theta_ij and NxNt data available
-    #   z_exact = Bx^T * Theta * Bt
-    # written using the pseudoinverse (?) as
-    #   Bx * z_exact * Bt^T = (BxBx^T) * Theta * (BtBt^T)
-    # split into 2 equations:
-    #   1) (BxBx^T) * W = Bx * z_exact * Bt^T   => solve for W
-    #   2) X = Theta * (BtBt^T), rewritten as 
-    #       (BtBt^T)^T Theta^T = W^T
-    #       BtBt^T Theta^T = W^T
-    Bxx = B_x @ B_x.T
-    Btt = B_t @ B_t.T
-    W = jnp.linalg.solve(Bxx, B_x @ z_exact @ B_t.T)
-    Theta = jnp.linalg.solve(Btt, W.T).T
+    beta_fit = beta_fun(theta, u=sol_exact['solution'], x=sol_exact['x'], t=sol_exact['t'])
 
-    # calculate the min-square beta
-    z_least_squares = B_x.T @ Theta @ B_t
-    beta_fit = BETA_MIN + (1 - BETA_MIN) * jnp.logaddexp(0, z_least_squares) / jnp.log(2)
-
-    err_beta = beta_fit - beta
+    if beta_fit.shape != beta_exact.shape and beta_fit.shape == (beta_exact.T).shape:
+        beta_fit = beta_fit.T
+    else:
+        raise ValueError(f'Shape error: the exact beta has shape {beta_exact.shape}, '
+                         f'whereas the beta fitted to the exact data has shape {beta_fit.shape}')
+    err_beta = beta_fit - beta_exact
     # global relative L2 error
-    err_rel_L2 = jnp.linalg.norm(err_beta) / jnp.linalg.norm(beta)
+    err_rel_L2 = jnp.linalg.norm(err_beta) / jnp.linalg.norm(beta_exact)
     # pointwise relative error
-    rel_err_beta = err_beta / beta
+    rel_err_beta = err_beta / beta_exact
     # average absolute pointwise relative error
     avg_rel_err = jnp.mean(jnp.abs(rel_err_beta))
 
@@ -340,3 +378,24 @@ def check_parametrisation_fitness(beta, B_x, B_t, BETA_MIN=1e-2):
     aux.check_msg(f'Max absolute relative beta error    : '
                   f'{100*jnp.max(jnp.abs(rel_err_beta)):.2f}%')
     aux.check_msg(f'Mean absolute relative beta error   : {100*avg_rel_err:.2f}%')
+    
+    if STEADY:
+        theta_report = PrettyTable()
+        time_str = f"at t = {sol_exact['t'][idx_time]} s" if not STEADY else ''
+        theta_report.title = f'Theta coefficients {time_str}'
+        theta_report.field_names = ['Index', 'Value']
+        for i, theta_i in enumerate(theta):
+            theta_report.add_row([i, f'{theta_i:+.5e}'])
+        aux.check_msg(theta_report.get_string())
+    
+    if PLOT:
+        fig = plt.figure()
+        plt.plot(sol_exact['x'], beta_exact[idx_time,:], label='Exact')
+        plt.plot(sol_exact['x'], beta_fit[idx_time,:], label='Fitted')
+        plt.xlabel('$x$ [-]')
+        plt.ylabel(r'$\beta$ [-]')
+        plt.autoscale(enable=True, axis='x', tight=True)
+        plt.legend()
+        plt.show(block=False)
+        if fig_file is not None:
+            aux.save_fig(fig, fig_file.name, fig_file.parent)

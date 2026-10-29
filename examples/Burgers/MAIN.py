@@ -139,11 +139,16 @@ if POST_PROC:
                           }
         else:
             beta_exact = None
+        sol_exact = {'x': jnp.asarray(file['mesh']['x']),
+                     't': jnp.asarray(file['mesh']['t']),
+                      'solution': jnp.asarray(file['exact']['solution'])
+                      }
 
 
 if __name__ == '__main__':
     if POST_PROC:
-        fiml.main.postprocessing(FIML_file, probes_file, post_dir, beta_exact=beta_exact)
+        fiml.main.postprocessing(FIML_file, probes_file, post_dir, beta_exact=beta_exact,
+                                 sol_exact=sol_exact)
     if ANALYSIS:
         fiml.main.analysis(exp_data, mesh, BC, nu, out_dir, beta_opts,
                        sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,

@@ -45,6 +45,7 @@ def read_beta_options(input_data):
 
 def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
     # calculate parameters common to several models
+    params = {}
     match opts['model']:
         case 'BxBt' | 'BxBt_softplus' | 'BxBt_exp':
             # matrices containing
@@ -65,6 +66,8 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             # specify the original domain mesh, so that its length is okay
             #B_x_interf = create_basis_functions_matrix(opts['N_basis_x'], x_interf, domain=x)
             N_params = B_x.shape[0] * B_t.shape[0]
+            params['B_x'] = B_x
+            params['B_t'] = B_t
         case 'RBF_Gauss_x' | 'RBF_Gauss_x_softplus':
             print('Calculating Gaussian radial basis functions matrix Phi(x)...')
             x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['num_RBF'])
@@ -72,13 +75,16 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             Phi = jax.vmap(lambda xc: jnp.exp(-opts['shape_factor']*(x_mesh-xc)**2),
                            in_axes=0, out_axes=1)(x_c)
             N_params = opts['num_RBF']
+            params['Phi'] = Phi
         case 'RBF_Gauss_u' | 'RBF_Gauss_u_softplus':
             print('Calculating Gaussian radial basis functions matrix Phi(u)...')
             x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['num_RBF'])
             N_params = opts['num_RBF']
+            params['x_c'] = x_c
         case _:
             raise ValueError(f"Unknown beta model '{opts['model']}'")
     print(f'Number of theta parameters to identify: {N_params}')
+    params['N_params'] = N_params
     
     # wrap each beta function
     DEPENDS_ON_U = False
@@ -114,7 +120,7 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
     # tridiagonal Jacobia of the original solver)
     beta.depends_on_u = DEPENDS_ON_U
     
-    return beta, N_params
+    return beta, params
 
 
 def _beta_BxBt(theta_r, B_x, B_t, beta_ref):    
@@ -189,6 +195,13 @@ def _beta_RBG_Gauss_u_softplus(theta_r, x_c, x, u, beta_ref, K, beta_min):
 def _sofplus_positivity_preserving(z, beta_min):
     beta = beta_min + (1 - beta_min)*jax.nn.softplus(z)/jnp.log(2)
     return beta
+
+def _invert_softplus(beta, beta_min):
+    # beta = F(z) = beta_min + (1 - beta_min) * softplus(x) / ln(2)
+    # invert it to obtain z = F^-1(beta)
+    w = (beta - beta_min) * jnp.log(2) / (1 - beta_min)
+    z = jnp.log(jnp.expm1(w))
+    return z
 
 
 # no need to JIT compile it, as this function is called only once during the
