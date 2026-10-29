@@ -191,6 +191,38 @@ def _quadratic_form(x, A):
     return Q
 
 
+def Gauss_Newton_hessian(h_fun, theta_MAP, Cm, Ctheta):
+    # h_theta returns the solution & the success flag => specify that
+    # it returns a pair and only the 1st item is the actual output
+    # G_ij = d(h(theta)_i)/dtheta_j
+    G_MAP = jax.jacfwd(h_fun)(theta_MAP)    # (N_data, N_theta)
+    
+    # G^T * Cm^-1 * G = (N_data, N_theta)^T * Cm * (N_data, N_theta)
+    # therefore Cm = (N_data, N_data)
+    Cm_inv = invert_covariance_matrix(Cm, at_least_2d=True, N=G_MAP.shape[0])
+    H_1 = G_MAP.T @ Cm_inv @ G_MAP
+    H_2 = invert_covariance_matrix(Ctheta, at_least_2d=True, N=theta_MAP.shape[0])
+    H_GN = H_1 + H_2
+    return H_GN
+
+
+def invert_covariance_matrix(C, at_least_2d=False, N=None):
+    if at_least_2d and N is None:
+        raise ValueError('If C is a scalar and a 2D covariance matrix is required, '
+                         'it is mandatory to provide the dimension N of the matrix')
+    C = jnp.asarray(C)
+    if C.ndim == 0:
+        C_inv = 1 / C
+        if at_least_2d:
+            C_inv = C_inv * jnp.eye(N)
+    elif C.ndim == 1:
+        C_inv = jnp.diag(1/C)
+    else:
+        # solve the linear system C*C^-1 = I to find C^-1 (Jordan's method?)
+        C_inv = jnp.linalg.solve(C, jnp.eye(C.size))
+    return C_inv
+
+
 def launch_sampling(theta_samples, run_solver_case, solver_fun, N_x, N_t, N_samples, solver_args, sample_dir=None, RUN_PARALLEL=False, N_WORKERS=1):
     solution = jnp.zeros(shape=(N_t, N_x, N_samples))
     # 2nd dimension 1 is not really needed, but that way they have the same

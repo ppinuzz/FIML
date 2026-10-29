@@ -91,6 +91,7 @@ if ANALYSIS:
     VIDEO = input_data['show_videos']
     BATCH = input_data['batch_mode']
     STEADY = input_data['steady']
+    hessian_model = input_data['hessian']
 
 if POST_PROC:
     with open(output_file, 'r') as file:
@@ -138,4 +139,4 @@ if __name__ == '__main__':
         fiml.main.analysis(exp_data, mesh, BC, nu, out_dir, beta_opts,
                        sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,
                        N_WORKERS, RUN_PARALLEL, solve_Burgers, CHECK, VIDEO,
-                       beta_exact, BATCH, IDX_TIME_PLOT=-1, STEADY=STEADY)
+                       beta_exact, BATCH, IDX_TIME_PLOT=-1, STEADY=STEADY, hessian=hessian_model)

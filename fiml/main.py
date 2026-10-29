@@ -7,6 +7,7 @@ Main functions of FIML methodology.
 import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
+from time import perf_counter
 
 import jax
 # use float64, rather than float32
@@ -80,7 +81,7 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
 def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior, 
              N_sampling_prior, N_sampling_post, SEED, sigma2_obs, N_WORKERS, RUN_PARALLEL,
              solver_fun, CHECK=False, VIDEO=False, beta_exact=None, BATCH=False,
-             IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True, STEADY=True):
+             IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True, STEADY=True, hessian='full'):
     
     if BATCH:
         aux.warning('BATCH mode selected, turning off all plot flags...')
@@ -301,8 +302,11 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     # initial guess: no correction needed, theta = 0 (i.e. beta = 1)
     print('Solving the optimisation problem argmin(J(theta)) to find '
           'maximum-a-posteriori (MAP) value...')
+    start_time = perf_counter()
     opt = sciopt.minimize(obj_fun_and_grad, x0=np.zeros(shape=(N_theta,)), 
                           method='BFGS', jac=True)
+    t_elapsed = perf_counter() - start_time
+    print(f'Optimisation problem solved in {t_elapsed:.2f} s')
     aux.check_optimiser_results(opt)
     
     theta_MAP = opt.x
@@ -333,7 +337,25 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     #%% CALCULATE COVARIANCE OF THE POSTERIOR (HESSIAN)
     
     print('Calculating the (approximate) posterior covariance matrix as inverse of the hessian matrix @ MAP...')
-    H_MAP = jax.jacfwd(jax.jacfwd(J_cost_fun))(theta_MAP)
+    match hessian.lower():
+        case 'full':
+            H_MAP = jax.jacfwd(jax.jacfwd(J_cost_fun))(theta_MAP)
+        case 'gauss_newton':
+            # h_theta returns the solution and the success flag => pass a wrapper
+            # function that returns only the solution, to avoid having JAX
+            # differentiating w.r.t. the flag
+            H_MAP = fiml.Gauss_Newton_hessian(lambda theta: h_theta(theta)[0], 
+                                              theta_MAP, sigma2_obs, sigma2_prior)
+        case 'test':
+            aux.warning('Calculating the Hessian matrix using all available options...')
+            H_MAP_full = jax.jacfwd(jax.jacfwd(J_cost_fun))(theta_MAP)
+            H_MAP_GN = fiml.Gauss_Newton_hessian(lambda theta: h_theta(theta)[0], 
+                                                 theta_MAP, sigma2_obs, sigma2_prior)
+            err_GN = jnp.linalg.norm(H_MAP_GN - H_MAP_full) / jnp.linalg.norm(H_MAP_full)
+            aux.warning(f'Gauss-Newton vs Exact Frobenius-norm error: {err_GN:.5e}')
+            H_MAP = H_MAP_full
+        case _:
+            raise ValueError(f"Unknown Hessian matrix option '{hessian}'")
     aux.check_hessian(H_MAP)
     # rather than inverting H with inv(H), calculate is solving the linear
     # system H*H_inv = I
