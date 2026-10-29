@@ -315,6 +315,8 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
                                             u_IC, u0, uL, STEADY, out_dir=None)
     beta_r = beta_fun(theta_MAP, u=sol_MAP)
     
+    aux.save_sampling(out_file, 'MAP', comprex_opts, theta_MAP, sol_MAP, 
+                      max_res_MAP, success_MAP, beta_r, key_random=None)
     
     if CHECK and beta_exact is not None:
         post.compare_exact_beta(beta_r, beta_exact['beta'], 
@@ -427,6 +429,7 @@ def postprocessing(sol_file, exp_file, out_dir, beta_exact=None):
             print('\t', group_name, '\t', list(group.keys()))
         prior_data = aux.load_dataset(file, 'prior')
         posterior_data = aux.load_dataset(file, 'posterior')
+        MAP_data = aux.load_dataset(file, 'MAP')
         mesh = aux.load_dataset(file, 'mesh')
     
     exp_file = Path(exp_file)
@@ -450,57 +453,12 @@ def postprocessing(sol_file, exp_file, out_dir, beta_exact=None):
                                          fig_file=out_dir/'meanSigmaExpPosterior')
     
     if beta_exact is not None:
-        post.compare_exact_beta(prior_data['beta'], beta_exact['beta'], 
+        post.compare_exact_beta((prior_data['beta'], posterior_data['beta'], MAP_data['beta']),
+                                beta_exact['beta'], 
                                 mesh['x'], mesh['t'], beta_exact['x'], beta_exact['t'], 
-                                t_plot=beta_exact['t'][-1], fig_file=out_dir/'checkBeta')
-# =============================================================================
-#         # get first object name/key; may or may NOT be a group
-#         a_group_key = list(f.keys())[0]
-#     
-#         # get the object type for a_group_key: usually group or dataset
-#         print(type(f[a_group_key])) 
-#     
-#         # If a_group_key is a group name, 
-#         # this gets the object names in the group and returns as a list
-#         data = list(f[a_group_key])
-#     
-#         # If a_group_key is a dataset name, 
-#         # this gets the dataset values and returns as a list
-#         data = list(f[a_group_key])
-#         # preferred methods to get dataset values:
-#         ds_obj = f[a_group_key]      # returns as a h5py dataset object
-#         ds_arr = f[a_group_key][()]  # returns as a numpy array
-# 
-# 
-#     
-#     # for each space-time point, calculate the sample mean of the N_sampling_prior
-#     # solutions (1st index: space, 2nd index: time, 3rd index: sampling)
-#     mean_u = jnp.mean(solution_corrected, axis=2)
-#     sigma_u = jnp.std(solution_corrected, axis=2)
-#     u_upper = mean_u + 2*sigma_u
-#     u_lower = mean_u - 2*sigma_u
-#     
-#     if CHECK:
-#         # re-interpolate experimental data over simulation time grid
-#         u_probe_interp = lambda u_probe: jnp.interp(t_mesh, t_exp, u_probe)
-#         sol_exp_interp_t = jax.vmap(u_probe_interp, in_axes=1, out_axes=1)(sol_exp)
-#         # data are stored as [t^k, u_1^k, ..., u_N^k] => create a column vector of
-#         # column vectors => flatten the 2D array in column-major order (Fortran-like)
-#         sol_exp_t = jnp.ravel(sol_exp_interp_t.T)
-#         
-#         fig = plt.figure()
-#         plt.plot(x_mesh, mean_u[IDX_TIME_PLOT,:], label='Mean $u$')
-#         plt.fill_between(x_mesh, u_upper[IDX_TIME_PLOT,:], u_lower[IDX_TIME_PLOT,:], 
-#                          alpha=0.3, color='r')
-#         plt.plot(x_mesh, u_upper[IDX_TIME_PLOT,:], color='r')
-#         plt.plot(x_mesh, u_lower[IDX_TIME_PLOT,:], color='r')
-#         plt.plot(x_exp, sol_exp_interp_t[IDX_TIME_PLOT], '*', label='Experiment')
-#         plt.xlabel('$x$ [-]')
-#         plt.ylabel('$u$ [-]')
-#         plt.autoscale(enable=True, axis='x', tight=True)
-#         plt.legend()
-#         plt.title(fr'Mean solution with $\pm 2\sigma$ at $t = {t_mesh[IDX_TIME_PLOT]:.5f}$ s')
-#         plt.show(block=False)
-#         aux.save_fig(fig, 'mean_prior_sigma', out_dir)
-# =============================================================================
-    
+                                t_plot=beta_exact['t'][-1], fig_file=out_dir/'checkBeta',
+                                beta_labels=('Prior', 'Posterior', 'MAP')
+                                )
+    # keep the terminal on hold to avoid closing figures immediately
+    aux.warning('Close all figures to finish the execution')
+    plt.show(block=True)

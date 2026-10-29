@@ -189,7 +189,15 @@ def sample_solution(solution, x_mesh=None, t_mesh=None, x_probes=None, t_probes=
 
 
 def save_sampling(hdf5_file, group_name, opts, theta, sol, res, success, beta,
-                  key_random):
+                  key_random=None):
+    # make all data at least 1D, otherwise you won't be able to apply the
+    # compression options
+    theta = jnp.atleast_1d(theta)
+    sol = jnp.atleast_1d(sol)
+    res = jnp.atleast_1d(res)
+    success = jnp.atleast_1d(success)
+    beta = jnp.atleast_1d(beta)
+    
     hdf5_group = hdf5_file.create_group(group_name)
     tmp_set = hdf5_group.create_dataset(name='theta', data=theta, **opts)
     tmp_set.attrs['description'] = ('Each column is one drow and theta contains the '
@@ -205,8 +213,10 @@ def save_sampling(hdf5_file, group_name, opts, theta, sol, res, success, beta,
     tmp_set = hdf5_group.create_dataset(name='beta', data=beta, **opts)
     tmp_set.attrs['description'] = ('Correction beta(x,y) with dimensione (Nx, Nt), '
                                     'transposed ordering w.r.t. solution variable')
-    tmp_set = hdf5_group.create_dataset(name='key', data=key_random, **opts)
-    tmp_set.attrs['description'] = ('Key used to randomly draw the parameters for the sampling')
+    if key_random is not None:
+        key_random = jnp.atleast_1d(key_random)
+        tmp_set = hdf5_group.create_dataset(name='key', data=key_random, **opts)
+        tmp_set.attrs['description'] = ('Key used to randomly draw the parameters for the sampling')
     # write to disk without closing the file
     print(f'Writing data to \n\t{Path(hdf5_file.filename).resolve()}')
     hdf5_file.flush()
