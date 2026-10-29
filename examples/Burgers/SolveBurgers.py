@@ -83,10 +83,10 @@ if len(sys.argv) > 1:
                 VIDEO = True
             case '--help' | '-h':
                 print('Possible flags: \n'
-                      '\t --solve: solve Burgers eq., with constant and variable viscosity \n'
-                      '\t --probes: sample solution at probe locations \n'
-                      '\t --video: show "video" of time-dependent solution \n'
-                      '\t --help: print this help')
+                      '\t --solve, -s: solve Burgers eq., with constant and variable viscosity \n'
+                      '\t --probes, -p: sample solution at probe locations \n'
+                      '\t --video, -s: show "video" of time-dependent solution \n'
+                      '\t --help, -h: print this help')
                 quit()
             case _:
                 raise ValueError('Unknown CLI input')
