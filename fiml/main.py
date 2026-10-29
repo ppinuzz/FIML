@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from pathlib import Path
 from time import perf_counter
+import yaml
 
 import jax
 # use float64, rather than float32
@@ -81,7 +82,8 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
 def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior, 
              N_sampling_prior, N_sampling_post, SEED, sigma2_obs, N_WORKERS, RUN_PARALLEL,
              solver_fun, CHECK=False, VIDEO=False, beta_exact=None, BATCH=False,
-             IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True, STEADY=True, hessian='full'):
+             IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True, STEADY=True, hessian='full',
+             input_file=None):
     
     if BATCH:
         aux.warning('BATCH mode selected, turning off all plot flags...')
@@ -91,7 +93,8 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     
     # OUTPUT DATA FILE
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_file = h5py.File(out_dir/'output.h5', 'w')
+    out_filename = out_dir / 'output.h5'
+    out_file = h5py.File(out_filename, 'w')
     # common compression options
     # shuffle: allows blocks to be moved around, possible memory gain
     # gzip: most portable and fairly fast
@@ -186,6 +189,20 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
             idx_valid = (t_exp <= T)
             t_exp = t_exp[idx_valid]
             sol_exp = sol_exp[idx_valid, :]
+    
+    
+    # copy content of the input file to output (for reproducibility's sake)
+    
+    if input_file is not None:
+        print(f'Saving input data to \n\t{out_filename.resolve()}...')
+        hdf5_group = out_file.create_group('input_data')
+        with open(input_file, 'r') as file:
+            input_data = yaml.safe_load(file)
+        aux.save_dict_to_hdf5(input_data, hdf5_group)
+        out_file.flush()
+    else:
+        # "float" empty type
+        out_file.create_dataset(name='input_data', data=h5py.Empty('f'))
     
     
     #%% PARAMETRISE CORRECTION FUNCTION BETA
@@ -452,6 +469,8 @@ def postprocessing(sol_file, exp_file, out_dir, beta_exact=None):
     post.check_experiments_in_sigma_band(posterior_data['solution'], **check_sigma_opts,
                                          fig_file=out_dir/'meanSigmaExpPosterior')
     
+    # compare prior, posterior and MAP beta correction to the exact one
+    # (if known)
     if beta_exact is not None:
         post.compare_exact_beta((prior_data['beta'], posterior_data['beta'], MAP_data['beta']),
                                 beta_exact['beta'], 
@@ -459,6 +478,10 @@ def postprocessing(sol_file, exp_file, out_dir, beta_exact=None):
                                 t_plot=beta_exact['t'][-1], fig_file=out_dir/'checkBeta',
                                 beta_labels=('Prior', 'Posterior', 'MAP')
                                 )
+    
+    # check if the parametrisation is able to reproduce the exact beta
+    
+    
     # keep the terminal on hold to avoid closing figures immediately
     aux.warning('Close all figures to finish the execution')
     plt.show(block=True)

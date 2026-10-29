@@ -148,4 +148,5 @@ if __name__ == '__main__':
         fiml.main.analysis(exp_data, mesh, BC, nu, out_dir, beta_opts,
                        sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,
                        N_WORKERS, RUN_PARALLEL, solve_Burgers, CHECK, VIDEO,
-                       beta_exact, BATCH, IDX_TIME_PLOT=-1, STEADY=STEADY, hessian=hessian_model)
+                       beta_exact, BATCH, IDX_TIME_PLOT=-1, STEADY=STEADY, hessian=hessian_model,
+                       input_file=input_file)

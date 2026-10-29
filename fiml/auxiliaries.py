@@ -7,7 +7,7 @@ Auxiliary functions.
 
 import numpy as np
 import jax.random as jrn
-from os import PathLike
+import h5py
 from pathlib import Path
 import jax
 # use float64, rather than float32
@@ -265,3 +265,17 @@ def load_dataset(h5_file_ptr, group_name='/'):
         # dataset[()]   numpy.ndarray or scalar, read whatever's in the database
         data[key] = dataset[()]
     return data
+
+
+def save_dict_to_hdf5(data, group_obj):
+    for key in data:
+        # call recursively the function till you get to a level where there
+        # are no more subdictionaries
+        if isinstance(data[key], dict):
+            subgroup = group_obj.create_group(key)
+            save_dict_to_hdf5(data[key], subgroup)
+        elif data[key] is None:
+            # "float" empty type
+            group_obj.create_dataset(key, data=h5py.Empty('f'))
+        else:
+            group_obj.create_dataset(key, data=data[key])
