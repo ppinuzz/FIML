@@ -9,7 +9,6 @@ Solve Burgers' equation
 @author: Andrea Pinardi <andrea.pinardi@polimi.it>
 """
 
-from numpy import savez_compressed
 import jax
 # use float64, rather than float32
 jax.config.update('jax_enable_x64', True)
@@ -18,7 +17,6 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from timeit import default_timer as timer
 from datetime import timedelta
-import inspect
 import sys
 import cloudpickle
 import h5py
@@ -130,19 +128,6 @@ if SOLVE:
     time_basic = end_time - start_time
     print(f'Elapsed time: {time_basic} s ({timedelta(seconds=time_basic)} hours)')
     
-    print(f'Saving solution to \n\t{sol_file_basic.resolve()}')
-    # obtain a string representation of the lambda function used for u(x,0):
-    #   'u_IC = lambda x: jnp.sin(jnp.pi*x/L)'
-    header_IC = inspect.getsourcelines(cfg.u_IC)[0][0].strip()
-    header = ('Solution of Burgers equation with constant viscosity\n'
-              f'x in [0,1], t in [0, {cfg.T}], nu0 = {cfg.nu0} m2/s\n'
-              f'{header_IC}\n'
-              'x [m], t [s], max_res [m/s2], u [m/s]')
-    savez_compressed(sol_file_basic, x=x_mesh, t=t_mesh, L=cfg.L, T=cfg.T, 
-                        nu=cloudpickle.dumps(cfg.nu0_fun), uL=cfg.uL, u0=cfg.u0, 
-                        u_IC=cloudpickle.dumps(cfg.u_IC), max_res=max_res_basic, 
-                        solution=sol_basic, description=header)
-    
     
     #%% VARIABLE VISCOSITY BURGERS' EQUATION
     
@@ -152,24 +137,6 @@ if SOLVE:
     end_time = timer()
     time_var_nu = end_time - start_time
     print(f'Elapsed time: {time_var_nu} s ({timedelta(seconds=time_var_nu)} hours)')
-    
-    print(f'Saving solution to \n\t{sol_file_var_nu.resolve()}')
-    header_IC = inspect.getsourcelines(cfg.u_IC)[0][0].strip()
-    header = ('Solution of Burgers equation with variable viscosity\n'
-              f'x in [0,1], t in [0, {cfg.T}], nu = nu(x,t) m2/s, nu0 = {cfg.nu0} m2/s\n'
-              f'{header_IC}\n'
-              'x [m], t [s], max_res [m/s2], u [m/s]')
-    savez_compressed(sol_file_var_nu, x=x_mesh, t=t_mesh, L=cfg.L, T=cfg.T, 
-                        nu=cloudpickle.dumps(cfg.nu), uL=cfg.uL, u0=cfg.u0, 
-                        u_IC=cloudpickle.dumps(cfg.u_IC), max_res=max_res_var_nu, 
-                        solution=sol_var_nu, description=header)
-    
-    
-    #%% CASE SETTINGS
-    
-    savez_compressed(cfg_file, x=x_mesh, t=t_mesh, L=cfg.L, T=cfg.T, 
-                     nu=cloudpickle.dumps(cfg.nu0_fun), uL=cfg.uL, u0=cfg.u0, 
-                     u_IC=cloudpickle.dumps(cfg.u_IC))
     
     
     #%% EVALUATE EXACT BETA CORRECTION (for reference)
@@ -187,10 +154,6 @@ if SOLVE:
     beta_eval = jax.vmap(
                     lambda t, u, ux_t: cfg.beta(x_mesh, t, u, ux_t, None)
                     )(t_mesh, sol_var_nu, ux)
-    savez_compressed(beta_file, x=x_mesh, t=t_mesh, u=sol_var_nu, ux=ux, uxx=None,
-                     nu_exact=cloudpickle.dumps(cfg.nu), 
-                     nu_approx=cloudpickle.dumps(cfg.nu0_fun), 
-                     beta=beta_eval)
     
     #%% SAVE DATA
     
@@ -259,20 +222,6 @@ else:
         max_res_var_nu = jnp.asarray(file['exact']['max_res'])
         sol_var_nu = jnp.asarray(file['exact']['solution'])
         beta_eval = jnp.asarray(file['beta']['beta'])
-# =============================================================================
-#     data_var_nu = jnp.load(sol_file_var_nu)
-#     data_basic = jnp.load(sol_file_basic)
-#     t_mesh = data_basic['t']
-#     x_mesh = data_basic['x']
-#     max_res_basic = data_basic['max_res']
-#     sol_basic = data_basic['solution']
-#     data_var_nu = jnp.load(sol_file_var_nu)
-#     # HACK: assuming same time and space mesh
-#     max_res_var_nu = data_var_nu['max_res']
-#     sol_var_nu = data_var_nu['solution']
-#     data_beta = jnp.load(beta_file)
-#     beta_eval = data_beta['beta']
-# =============================================================================
 
 
 #%% EXTRACT "PROBES DATA"
@@ -299,24 +248,6 @@ if EXTRACT_PROBES:
         hdf5_var_nu = file.create_group('exact')
         tmp_set = hdf5_var_nu.create_dataset(name='solution', data=sol_probes_var_nu, **comprex_opts)
         tmp_set.attrs['description'] = 'Sampled solution of exact problem'
-    print(f'Saving sampled basic solution to \n\t{probes_file_basic.resolve()}')
-    header_probes = ', '.join([f'{cfg.x_probes[i]}' for i in range(0, cfg.N_probes)])
-    header = ('Solution of Burgers equation with constant viscosity sampled along the axis\n'
-              f'x in [0,1], t in [0, {cfg.T}], nu0 = {cfg.nu0} m2/s\n'
-              f'Each row contains {cfg.N_probes} probe values\n'
-              f'Probe locations [m]: {header_probes}\n'
-              f'x [m], t [s], u [m/s]')
-    savez_compressed(probes_file_basic, t=t_mesh, x=cfg.x_probes, 
-                     solution=sol_probes_basic, description=header)
-    
-    print(f'Saving sampled variable viscosity solution to \n\t{probes_file_var_nu.resolve()}')
-    header=('Solution of Burgers equation with variable viscosity sampled along the axis\n'
-            f'x in [0,1], t in [0, {cfg.T}], nu = nu(x,t) m2/s\n'
-            f'Each row contains {cfg.N_probes} probe values\n'
-            f'Probe locations [m]: {header_probes}\n'
-            f'x [m], t [s], u [m/s]')
-    savez_compressed(probes_file_var_nu, t=t_mesh, x=cfg.x_probes, 
-                     solution=sol_probes_var_nu, description=header)
 
 
 #%% PLOT SOLUTION
