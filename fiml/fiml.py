@@ -219,7 +219,7 @@ def invert_covariance_matrix(C, at_least_2d=False, N=None):
         C_inv = jnp.diag(1/C)
     else:
         # solve the linear system C*C^-1 = I to find C^-1 (Jordan's method?)
-        C_inv = jnp.linalg.solve(C, jnp.eye(C.size))
+        C_inv = jnp.linalg.solve(C, jnp.eye(C.shape[0]))
     return C_inv
 
 

@@ -210,6 +210,12 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     beta_fun, beta_params = betamod.parametrise_beta(beta_opts, x_mesh, t_mesh, STEADY)
     N_theta = beta_params['N_params']
     
+    print('Available data points: {sol_exp.size}')
+    print('Unknown parameters: {N_theta}')
+    if sol_exp.size < N_theta:
+        aux.warning(f'Under-determined system: {N_theta} to find, but only '
+                    f'{sol_exp.size} data points')
+    
     
     #%% DRAW FROM PRIOR DISTRIBUTION
     

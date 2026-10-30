@@ -139,13 +139,9 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
     # beta_num can either be
     #   - a single array, to check a single beta vs the exact one
     #   - a tuple of arrays (e.g. prior, posterior and MAP)
-    if isinstance(beta_num, tuple):
-        if len(beta_num) == 1:
-            beta_num = jnp.asarray(beta_num)
-        else:
-            beta_num = tuple([jnp.asarray(beta_i) for beta_i in beta_num])
-    else:
-        beta_num = (jnp.asarray(beta_num), )
+    if not isinstance(beta_num, tuple):
+        beta_num = (beta_num, )
+    beta_num = tuple([jnp.asarray(beta_i) for beta_i in beta_num])
 
     if not isinstance(beta_labels, tuple):
         beta_labels = tuple(beta_labels)
@@ -163,6 +159,7 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
         ax_beta.set_title(fr'$\beta$ correction {time_str}')
         
         fig_err, ax_err = plt.subplots()
+        ax_err.axhline(0, color='k', linestyle='--')
         ax_err.set_xlabel(r'$x$ [-]')
         ax_err.set_ylabel(r'$(\beta - \beta_\mathrm{ex})/\beta_\mathrm{ex}$ [\%]')
         ax_err.autoscale(enable=True, axis='x', tight=True)
@@ -219,7 +216,7 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
                 #fig.canvas.flush_events()
                 #plt.pause(0.0000001)
                 plt.pause(0.01)
-                ax.set_title(f'$t = {t[j]:.4f}$ s')
+                ax.set_title(f'$t = {t_beta[j]:.4f}$ s')
             plt.ioff()
             # show figure only if it hasn't been closed by the user
             if plt.fignum_exists(fig.number):
@@ -314,18 +311,34 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
     beta_fun, beta_params = betamod.parametrise_beta(opts, sol_exact['x'], 
                                                      sol_exact['t'], STEADY)
     
+    # check beta ordering: it should be (Nt, Nx)^T, i.e. (Nx, Nt)
+    Nx = sol_exact['x'].size
+    Nt = sol_exact['t'].size
+    beta_shape_ref = (Nx, Nt)
+    if beta_exact.shape != beta_shape_ref:
+        beta_exact = beta_exact.T
+        if beta_exact.shape != beta_shape_ref:
+            raise ValueError(f'Shape mismatch: beta should have shape {beta_shape_ref}, '
+                             f'but it has shape {beta_exact.shape}')
+    
     # z here is always obtained using a matrix-vector product, and therefore
     # has a LINEAR relationship
-    if 'softplus' in opts['model']:
-        # softplus models:
-        #   beta = beta_min + (1-beta_min)*softplus(z)/ln(2)
-        z_exact = betamod._invert_softplus(beta_exact, opts['beta_min'])
-    elif 'exp' in opts['model']:
-        # exp models:
-        #   beta = e^z
-        z_exact = jnp.log(beta_exact)
-    else:
-        raise ValueError('At the moment, only models with softplus function can be checked')
+    match opts['model']:
+        case 'BxBt_softplus' | 'RBF_Gauss_x_softplus' | 'RBF_Gauss_u_softplus':
+            # softplus models:
+            #   beta = beta_min + (1-beta_min)*softplus(z)/ln(2)
+            # shape: (Nx, Nt)
+            z_exact = betamod._invert_softplus(beta_exact, opts['beta_min'])
+        case 'BxBt_exp':
+            # exp models:
+            #   beta = e^z
+            # shape: (Nx, Nt)
+            z_exact = jnp.log(beta_exact)
+        case 'BxBt' | 'RBF_Gauss_x' | 'RBF_Gauss_u':
+            # shape: (Nx, Nt)
+            z_exact = beta_exact - opts['beta_ref']
+        case _:
+            raise ValueError(f"Unknown beta model '{opts['model']}'")
     
     match opts['model']:
         case 'BxBt' | 'BxBt_softplus' | 'BxBt_exp':
@@ -338,20 +351,49 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
             #   2) X = Theta * (BtBt^T), rewritten as 
             #       (BtBt^T)^T Theta^T = W^T
             #       BtBt^T Theta^T = W^T
-            Bxx = beta_params['B_x'] @ beta_params['B_x'].T
-            Btt = beta_params['B_t'] @ beta_params['B_t'].T
-            W = jnp.linalg.solve(Bxx, beta_params['B_x'] @ z_exact @ beta_params['B_t'].T)
-            Theta = jnp.linalg.solve(Btt, W.T).T
+            #Bxx = beta_params['B_x'] @ beta_params['B_x'].T
+            #Btt = beta_params['B_t'] @ beta_params['B_t'].T
+            #W = jnp.linalg.solve(Bxx, beta_params['B_x'] @ z_exact @ beta_params['B_t'].T)
+            #Theta = jnp.linalg.solve(Btt, W.T).T
+            # without using pseudo inverse: w = Theta*Bt, shape (M, Nt)
+            # => solve Bx^T * w = z, where 
+            w = jnp.linalg.lstsq(beta_params['B_x'].T, z_exact)[0]
+            # solve Theta*Bt = w, i.e. Bt^T*Theta^T = w^T
+            Theta = jnp.linalg.lstsq(beta_params['B_t'].T, w.T)[0].T
             # rewrite the matrix as a vector of parameters, as required by
             # the beta(theta, ...) function
-            # Theta is a row vector of column vectors => unravel in column-major
-            # order (Fortran-style)
-            theta = jnp.ravel(Theta, order='F')
+            # Theta is a column vector of row vector => unravel in row-major
+            # order (C-style)
+            theta = jnp.ravel(Theta, order='C')
         case 'RBF_Gauss_x' | 'RBF_Gauss_x_softplus':
-            # z = Phi * theta, with Phi = (Nx, N_theta)
+            if not STEADY:
+                raise ValueError('RBF_Gauss_x and RBF_Gauss_x_softplus are only '
+                                 'meant for STEADY problems!')
+            # z = Phi * theta, with Phi = (Nx, N_RBF)
             # the k-th row of z is the z vector for the k-th time instant
             # => transpose it to have it as (Nx, 1), rather than (1, Nx)
-            theta = jnp.linalg.lstsq(beta_params['Phi'], z_exact.T)[0]
+            theta = jnp.linalg.lstsq(beta_params['Phi'], z_exact)[0]
+            # theta: (N_theta, 1) -> (N_theta, )
+            theta = jnp.ravel(theta)
+        case 'RBF_Gauss_u' | 'RBF_Gauss_u_softplus':
+            # shape: (Nx, N_RBF, N_t)
+            N_RBF = beta_params['N_params']
+            Phi = betamod._RBF_Gauss_u_Phi(sol_exact['x'], beta_params['x_c'], 
+                                           sol_exact['solution'], opts['shape_factor'])
+            # at each time instant, the N_RBF equations holds:
+            #   Phi[:,:,k] * theta = z[:,k]
+            # since theta is always the same, it can be rewritten by stacking
+            # in columns all the equations
+            #   [  Phi[:,:,1]  ]           [  z[:,1].T  ]
+            #   [  Phi[:,:,2]  ] * theta = [  z[:,2].T  ]
+            #         ...                  [     ...    ]
+            #   [  Phi[:,:,Nt] ]           [  z[:,Nt].T ]
+            # reorder the axes so that it has shape (Nx, Nt, N_RBF)
+            Phi_eq = jnp.transpose(Phi, (0, 2, 1))
+            # and regroup them along the 3rd axis
+            Phi_eq = jnp.reshape(Phi_eq, (Nx*Nt, N_RBF))
+            z_eq = jnp.ravel(z_exact, order='C')
+            theta = jnp.linalg.lstsq(Phi_eq, z_eq)[0]
             # theta: (N_theta, 1) -> (N_theta, )
             theta = jnp.ravel(theta)
         case _:
@@ -359,11 +401,9 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
 
     beta_fit = beta_fun(theta, u=sol_exact['solution'], x=sol_exact['x'], t=sol_exact['t'])
 
-    if beta_fit.shape != beta_exact.shape and beta_fit.shape == (beta_exact.T).shape:
-        beta_fit = beta_fit.T
-    else:
-        raise ValueError(f'Shape error: the exact beta has shape {beta_exact.shape}, '
-                         f'whereas the beta fitted to the exact data has shape {beta_fit.shape}')
+    if beta_fit.shape != beta_shape_ref:
+        raise ValueError('Shape error: beta fitted to the exact data should '
+                         f'have shape {beta_shape_ref}, not {beta_fit.shape}')
     err_beta = beta_fit - beta_exact
     # global relative L2 error
     err_rel_L2 = jnp.linalg.norm(err_beta) / jnp.linalg.norm(beta_exact)
@@ -385,13 +425,13 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
         theta_report.title = f'Theta coefficients {time_str}'
         theta_report.field_names = ['Index', 'Value']
         for i, theta_i in enumerate(theta):
-            theta_report.add_row([i, f'{theta_i:+.5e}'])
+            theta_report.add_row([i+1, f'{theta_i:+.5e}'])
         aux.check_msg(theta_report.get_string())
     
     if PLOT:
         fig = plt.figure()
-        plt.plot(sol_exact['x'], beta_exact[idx_time,:], label='Exact')
-        plt.plot(sol_exact['x'], beta_fit[idx_time,:], label='Fitted')
+        plt.plot(sol_exact['x'], beta_exact[:,idx_time], label='Exact')
+        plt.plot(sol_exact['x'], beta_fit[:,idx_time], label='Fitted')
         plt.xlabel('$x$ [-]')
         plt.ylabel(r'$\beta$ [-]')
         plt.autoscale(enable=True, axis='x', tight=True)
