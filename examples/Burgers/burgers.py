@@ -244,11 +244,23 @@ def newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
         # (e.g. (N,) rather than (N,1), if the input has shape (N,))
         y = jnp.reshape(y, v.shape)
         return y
-
-    delta, _ = jax.scipy.sparse.linalg.gmres(JdU_fun_int, -res_int, M=apply_preconditioner,
+    # pass to JAX's GMRES the preconditions system
+    # (using the M=... keyword argument, the tolerance check is on the non-preconditioned
+    # residuals => if the P^-1 strongly reduced the residual, it could go below
+    # GMRES tolerance and not iterations are performed despite the system not
+    # being solved)
+    # LHS P^-1 * J * du
+    JdU_fun_precond = lambda v: apply_preconditioner(JdU_fun_int(v))
+    # RHS: - P^-1 * F(u), where F(u) = residual(u)
+    RHS_precond = apply_preconditioner(-res_int)
+    #delta, _ = jax.scipy.sparse.linalg.gmres(JdU_fun_int, -res_int, M=apply_preconditioner,
+    #                                         tol=TOL, atol=0.0, restart=GMRES_RESTART,
+    #                                         maxiter=MAX_ITER)
+    delta, _ = jax.scipy.sparse.linalg.gmres(JdU_fun_precond, RHS_precond,
                                              tol=TOL, atol=0.0, restart=GMRES_RESTART,
                                              maxiter=MAX_ITER)
-    # check residuals of the linear system J*du = -res
+    # check residuals of the ORIGINAL linear system J*du = -res
+    # (not the preconditioned one!)
     res_lin_sys = JdU_fun_int(delta) + res_int
     # if the residual is 0, relative error is 0/0 => use max(|res|, 1e-30)
     err_rel_lin_sys = jnp.linalg.norm(res_lin_sys) / jnp.maximum(jnp.linalg.norm(res_int), 1e-30)
