@@ -193,10 +193,11 @@ def _jacobian_colouring_tridiag(JdU_fun, N):
     return lower_diag, main_diag, upper_diag
 
 
-@partial(jax.jit, static_argnames=('nu', 'beta_fun', 'GMRES_RESTART'))
+@partial(jax.jit, static_argnames=('nu', 'beta_fun', 'GMRES_RESTART', 
+                                   'ITER_MAX_BACKTRACK'))
 def Newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
                        TOL=1e-6, GMRES_RESTART=30, MAX_ITER=10, K=1e-4,
-                       URF_cut=0.5, ITER_MAX_BACKTRACK=20):
+                       URF_cut=0.5, ITER_MAX_BACKTRACK=20, LIN_TOL=1e-4):
     """Newton step for solution-dependent beta(theta, u)"""
 
     # Original Newton: J(u^k, beta(x,t))(u^k+1 - u_k) = -F(u^k, beta(x,t))
@@ -267,13 +268,14 @@ def Newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
     err_rel_lin_sys = jnp.linalg.norm(res_lin_sys) / jnp.maximum(jnp.linalg.norm(res_int), 1e-30)
     iter_okay = (jnp.all(jnp.isfinite(delta))
                  & jnp.all(jnp.isfinite(err_rel_lin_sys)) 
-                 & (err_rel_lin_sys < TOL))
+                 & (err_rel_lin_sys < LIN_TOL))
     jax.lax.cond(~iter_okay,
                  lambda _: jax.debug.print('WARNING: GMRES relative residual {res:.5e} '
-                                           'exceeds tolerance {tol:.5e}, delta = {delta}',
+                                           'exceeds tolerance {tol:.5e}, '
+                                           '||delta||_inf = {delta_norm}',
                                            res=err_rel_lin_sys,
-                                           tol=TOL,
-                                           delta=delta
+                                           tol=LIN_TOL,
+                                           delta_norm=jnp.max(jnp.abs(delta))
                                            ),
                  lambda _: None,
                  operand=None
@@ -285,35 +287,35 @@ def Newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
     def Newton_backtrack(_):
         # the iteration index must always be provided as 1st argument
         def backtrack_step(i, state):
-            URF, U_accepted, err_accepted, already_good = state
-    
-            # under-relaxed Newton step
-            U_under = u_int + URF*delta
-            err_under = jnp.max(jnp.abs(F(U_under)))
-            
-            # if the error doesn't decrease "enough", reduce the URF
-            # (use 1-K*URF, rather than 1-K, to keep the error decrease proportional
-            # to the URF: with very small URF, you cannot ask for a big error
-            # reduction)
-            good = (jnp.isfinite(err_under) & (err_under <= (1 - K*URF)*err_old))
-            # if the previous trial step already satisfied the sufficient-error-
-            # decrease condition, there's no need to keep decreasing the URF
-            keep_decreasing = good & (~already_good)
-            # where this step decreased the error, but the previous didn't,
-            # patch the solution copying the new underrelaxed solution
-            U_accepted = jnp.where(keep_decreasing, U_under, U_accepted)
-            err_accepted = jnp.where(keep_decreasing, err_under, err_accepted)
-            already_good = already_good | good
-            # if even after under-relaxing this is not enough, reduce the URF
-            URF = jnp.where(already_good, URF, URF_cut*URF)
-    
-            return URF, U_accepted, err_accepted, already_good
-    
+            def evaluate_step(state):
+                URF, U_accepted, err_accepted, already_good = state
+        
+                # under-relaxed Newton step
+                U_under = u_int + URF*delta
+                err_under = jnp.max(jnp.abs(F(U_under)))
+                
+                # if the error doesn't decrease "enough", reduce the URF
+                # (use 1-K*URF, rather than 1-K, to keep the error decrease proportional
+                # to the URF: with very small URF, you cannot ask for a big error
+                # reduction)
+                decreased_err = (jnp.isfinite(err_under) & (err_under <= (1 - K*URF)*err_old))
+                U_accepted = jnp.where(decreased_err, U_under, U_accepted)
+                err_accepted = jnp.where(decreased_err, err_under, err_accepted)
+                # if even after under-relaxing this is not enough, reduce the URF
+                URF = jnp.where(decreased_err, URF, URF_cut*URF)
+        
+                return URF, U_accepted, err_accepted, decreased_err
+            # if state[3] (i.e. the flag decreased_err) is True, then return
+            # the calculated state, as the error decreased with the damping
+            # if False, call evaluate trial, which will recalculate the same
+            # thing, but using the reduced URF
+            step_result = jax.lax.cond(state[3], lambda s: s, evaluate_step, state)
+            return step_result
         # start applying the under-relaxed Newton correction with URF = 1
         # (err = inf so that the loop will start, already_good = False since there's
         # no previous step)
         state_init = (1.0, u_int, jnp.inf, False)
-        # same as for i in range(0, ITER_MAX_BACKTRACK+1)
+        # same as for i in range(0, ITER_MAX_BACKTRACK)
         _, U_accepted, err_accepted, accepted = jax.lax.fori_loop(0, ITER_MAX_BACKTRACK, 
                                                         backtrack_step, 
                                                         state_init)
