@@ -339,6 +339,12 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
                                             u_IC, u0, uL, STEADY, out_dir=None)
     beta_r = beta_fun(theta_MAP, u=sol_MAP)
     
+    start_time = perf_counter()
+    cost_and_jacobian(theta_MAP)
+    t_elapsed = perf_counter() - start_time
+    print(f'Time required to evaluate grad(J): {t_elapsed:.3e} s')
+    quit()
+    
     aux.save_sampling(out_file, 'MAP', comprex_opts, theta_MAP, sol_MAP, 
                       max_res_MAP, success_MAP, beta_r, key_random=None)
     
