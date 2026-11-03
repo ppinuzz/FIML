@@ -73,9 +73,9 @@ else:
 if ANALYSIS:
     with open(input_file, 'r') as file:
         input_data = yaml.safe_load(file)
-    sol_file = Path(input_data['sol_file'])
-    probes_file = Path(input_data['data_file'])
-    out_dir = Path(input_data['output_dir'])
+    sol_file = Path(input_data['files']['solution'])
+    probes_file = Path(input_data['files']['data'])
+    out_dir = Path(input_data['files']['output_dir'])
     
     beta_opts = fiml.beta.read_beta_options(input_data)
     
@@ -85,11 +85,11 @@ if ANALYSIS:
     sigma2_obs = float(input_data['variance_observational'])
     
     SEED = input_data['seed']
-    RUN_PARALLEL = input_data['run_parallel']
-    N_WORKERS = int(input_data['parallel_workers'])
-    CHECK = input_data['check_outputs']
-    VIDEO = input_data['show_videos']
-    BATCH = input_data['batch_mode']
+    RUN_PARALLEL = input_data['options']['run_parallel']
+    N_WORKERS = int(input_data['options']['parallel_workers'])
+    CHECK = input_data['options']['check_outputs']
+    VIDEO = input_data['options']['show_videos']
+    BATCH = input_data['options']['batch_mode']
     STEADY = input_data['steady']
     hessian_model = input_data['hessian']
     optimiser_opts = input_data['optimisation']
@@ -114,9 +114,6 @@ if ANALYSIS:
                     'solution': jnp.asarray(file['exact']['solution'])
                     }
     with h5py.File(sol_file, 'r') as file:
-        mesh = {'x': jnp.asarray(file['mesh']['x']),
-                't': jnp.asarray(file['mesh']['t'])
-                }
         BC = {'u0': jnp.asarray(file['settings']['u0']), 
               'uL': jnp.asarray(file['settings']['uL']), 
               # HDF5 dataset object -> NumPy array -> lambda function
@@ -130,6 +127,7 @@ if ANALYSIS:
                           }
         else:
             beta_exact = None
+    mesh = fiml.auxiliaries.generate_mesh(input_data)
 
 if POST_PROC:
     with h5py.File(beta_exact_file, 'r') as file:

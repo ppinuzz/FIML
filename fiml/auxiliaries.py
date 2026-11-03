@@ -289,6 +289,7 @@ def save_dict_to_hdf5(data, group_obj):
         else:
             group_obj.create_dataset(key, data=data[key])
 
+
 def print_optimiser_info(opts):
     text = [f"Optimiser        : {opts['optimiser']}"]
     match opts['optimiser'].lower():
@@ -300,3 +301,43 @@ def print_optimiser_info(opts):
         case _:
             raise ValueError(f"Unknown adaptive optimiser '{opts['optimiser']}'")
     print('\n'.join(text))
+
+
+def generate_mesh(input_data):
+    mesh_opts = input_data['mesh']
+    sol_file = input_data['files']['solution']
+    
+    with h5py.File(sol_file, 'r') as file:
+        # file['settings']['L']     => HDF5 dataset
+        # file['settings']['L'][()] => content of the dataset
+        L = file['settings']['L'][()]
+        T = file['settings']['T'][()]
+        if mesh_opts['dx'] is None:
+            print('No x-spacing provided, reading exact solution files for mesh settings...')
+            x_mesh = jnp.asarray(file['mesh']['x'])
+        else:
+            print(f'Calculating space mesh in domain [0, {L}] with discretisation '
+                  f"step dx = {mesh_opts['dx']}...")
+            # N elements => N+1 nodes
+            N_x = int(L / mesh_opts['dx']) + 1
+            x_mesh = jnp.linspace(0, L, N_x)
+        
+        if mesh_opts['dt'] is None:
+            if input_data['steady']:
+                print('No time step provided, reading exact solution files for mesh settings...')
+                t_mesh = jnp.asarray(file['mesh']['t'])
+            else:
+                warning('Steady simulation, time will be ignored and set to 0 arbitrarily...')
+                t_mesh = jnp.array([0])
+        else:
+            print(f'Calculating time step in domain [0, {T}] with time step '
+                  f"dx = {mesh_opts['dt']}...")
+            # N elements => N+1 nodes
+            N_t = int(T / mesh_opts['dt']) + 1
+            t_mesh = jnp.linspace(0, T, N_t)
+        
+        mesh = {'x': x_mesh,
+                't': t_mesh
+                }
+    return mesh
+        
