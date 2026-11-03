@@ -288,17 +288,30 @@ def minimise_cost_function(cost_and_jacobian, x0, method='amsgrad',
         int_state = optimiser.init(theta_0)
         cost_0, grad_0, success_0 = cost_and_jacobian(theta_0)
         valid_sol_0 = _is_valid_sol(cost_0, grad_0, success_0)
-        state_0 = (theta_0, int_state, cost_0, grad_0, 0, 1, valid_sol_0, False)
+        history = {'cost': jnp.full((max_iter+1,), jnp.nan),
+                   'grad_norm': jnp.full((max_iter+1,), jnp.nan),
+                   'theta': jnp.full((max_iter+1, x0.size), jnp.nan),
+                   'URF': jnp.full((max_iter+1,), jnp.nan),
+                   'N_fun_eval': jnp.full((max_iter+1,), jnp.nan)
+                   }
+        state_0 = (theta_0, int_state, cost_0, grad_0, 0, 1, valid_sol_0, False, history)
 
+        history['cost'] = history['cost'].at[0].set(cost_0)
+        history['grad_norm'] = history['grad_norm'].at[0].set(jnp.linalg.norm(grad_0))
+        history['theta'] = history['theta'].at[0].set(theta_0)
+        # no under-relaxation at the beginning
+        history['URF'] = history['URF'].at[0].set(1)
+        history['N_fun_eval'] = history['N_fun_eval'].at[0].set(1)
+        
         # stopping condition: ||grad(J)|| > tol 
         # (exact solution: grad(J) = 0)
         def continue_optimisation(state):
-            _, _, _, grad, N_it, _, valid, _ = state
+            _, _, _, grad, N_it, _, valid, _, _ = state
             keep_going = valid & (N_it < max_iter) & (jnp.linalg.norm(grad) > tol)
             return keep_going
 
         def optimisation_step(state):
-            theta, opt_state, cost, grad, N_it, N_fun_eval, valid, failed = state
+            theta, opt_state, cost, grad, N_it, N_fun_eval, valid, failed, history = state
             updates, opt_state_trial = optimiser.update(grad, opt_state, theta)
             # N_attempts, accepted, theta, J, grad(J)
             trial_state = (0, False, theta, cost, grad)
@@ -342,6 +355,16 @@ def minimise_cost_function(cost_and_jacobian, x0, method='amsgrad',
                                          opt_state, opt_state_trial)
             N_it = N_it + okay_sol.astype(jnp.int32)
             N_fun_eval = N_fun_eval + N_attempts
+            
+            def update_history(history):
+                return {
+                    'cost': history['cost'].at[N_it].set(cost_new),
+                    'grad_norm': history['grad_norm'].at[N_it].set(jnp.linalg.norm(grad_new)),
+                    'theta': history['theta'].at[N_it].set(theta_new),
+                    'URF': history['URF'].at[N_it].set(0.5**(N_attempts-1)),
+                    'N_fun_eval': history['N_fun_eval'].at[N_it].set(N_fun_eval)
+                }
+            history = jax.lax.cond(okay_sol, update_history, lambda h: h, history)
 
             if print_every:
                 # always print at 1st step
@@ -361,17 +384,20 @@ def minimise_cost_function(cost_and_jacobian, x0, method='amsgrad',
                              lambda _: None, operand=None)
 
             return (theta_new, opt_state_new, cost_new, grad_new, N_it,
-                    N_fun_eval, valid & okay_sol, failed | ~okay_sol)
+                    N_fun_eval, valid & okay_sol, failed | ~okay_sol, history)
 
-        theta, _, cost, grad, N_it, N_fun_eval, valid, failed = (
+        theta, _, cost, grad, N_it, N_fun_eval, valid, failed, history = (
                                     jax.lax.while_loop(continue_optimisation,
                                                        optimisation_step, 
                                                        state_0)
                                     )
-        return theta, cost, grad, N_it, N_fun_eval, valid, failed, valid_sol_0
+        return theta, cost, grad, N_it, N_fun_eval, valid, failed, valid_sol_0, history
 
     opt_sol = run_optimiser(x0)
-    theta, cost, grad, N_it, N_fun_eval, valid, failed, valid_sol_0 = opt_sol
+    theta, cost, grad, N_it, N_fun_eval, valid, failed, valid_sol_0, history = opt_sol
+    # remove unused entries (array has been preallocated to the max number of
+    # iterations)
+    history = {key: values[0:N_it+1] for key, values in history.items()}
 
     # repack output into a SciPy's OptimizeResult object, to make the code
     # compatible with SciPy's BFSG optimiser
@@ -393,5 +419,5 @@ def minimise_cost_function(cost_and_jacobian, x0, method='amsgrad',
                                    jac=np.asarray(grad), nit=int(N_it),
                                    nfev=int(N_fun_eval), njev=int(N_fun_eval),
                                    success=bool(converged), status=status, 
-                                   message=message)
+                                   message=message, history=history)
     return result

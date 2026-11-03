@@ -365,6 +365,9 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
                                 t_plot=beta_exact['t'][-1], fig_file=out_dir/'checkBeta', 
                                 PLOT=PLOT, VIDEO=VIDEO)
     
+    if PLOT:
+        post.plot_convergence_history(opt, fig_file=out_dir/'optimiserHistory')
+    
     
     #%% CHECK MAP SOLUTION VS BASELINE
     

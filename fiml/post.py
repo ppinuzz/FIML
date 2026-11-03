@@ -439,3 +439,26 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
         plt.show(block=False)
         if fig_file is not None:
             aux.save_fig(fig, fig_file.name, fig_file.parent)
+
+
+def plot_convergence_history(opt_obj, fig_file=None):
+    # iter = 0 is the initial guess
+    iter_ax = jnp.arange(0, opt_obj.nit+1, step=1)
+    
+    fig_grad = plt.figure()
+    plt.semilogy(iter_ax, opt_obj.history['grad_norm'], label='Exact')
+    plt.xlabel('Iteration')
+    plt.ylabel(r'$||\nabla\mathcal{J}(\theta)||$')
+    plt.autoscale(enable=True, axis='x', tight=True)
+    plt.show(block=False)
+    if fig_file is not None:
+        aux.save_fig(fig_grad, fig_file.name, fig_file.parent)
+    
+    fig_cost = plt.figure()
+    plt.plot(iter_ax, opt_obj.history['cost'], label='Exact')
+    plt.xlabel('Iteration')
+    plt.ylabel(r'$\mathcal{J}(\theta)$')
+    plt.autoscale(enable=True, axis='x', tight=True)
+    plt.show(block=False)
+    if fig_file is not None:
+        aux.save_fig(fig_cost, f'{fig_file.name}_cost', fig_file.parent)
