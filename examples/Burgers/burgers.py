@@ -196,7 +196,7 @@ def _jacobian_colouring_tridiag(JdU_fun, N):
 @partial(jax.jit, static_argnames=('nu', 'beta_fun', 'GMRES_RESTART', 
                                    'ITER_MAX_BACKTRACK'))
 def Newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
-                       TOL=1e-6, GMRES_RESTART=30, MAX_ITER=10, K=1e-4,
+                       TOL=1e-8, GMRES_RESTART=30, MAX_ITER=10, K=1e-4,
                        URF_cut=0.5, ITER_MAX_BACKTRACK=20, LIN_TOL=1e-4):
     """Newton step for solution-dependent beta(theta, u)"""
 
@@ -258,31 +258,40 @@ def Newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
     #delta, _ = jax.scipy.sparse.linalg.gmres(JdU_fun_int, -res_int, M=apply_preconditioner,
     #                                         tol=TOL, atol=0.0, restart=GMRES_RESTART,
     #                                         maxiter=MAX_ITER)
+    # 'incremental' = uses QR decomposition incrementally => allows for early
+    # termination & improves stability
+    # 'batched' = solves least squares problem at each iteration
     delta, _ = jax.scipy.sparse.linalg.gmres(JdU_fun_precond, RHS_precond,
                                              tol=TOL, atol=0.0, restart=GMRES_RESTART,
-                                             maxiter=MAX_ITER)
+                                             maxiter=MAX_ITER, solve_method ='incremental')
     # check residuals of the ORIGINAL linear system J*du = -res
     # (not the preconditioned one!)
     res_lin_sys = JdU_fun_int(delta) + res_int
     # if the residual is 0, relative error is 0/0 => use max(|res|, 1e-30)
     err_rel_lin_sys = jnp.linalg.norm(res_lin_sys) / jnp.maximum(jnp.linalg.norm(res_int), 1e-30)
-    iter_okay = (jnp.all(jnp.isfinite(delta))
-                 & jnp.all(jnp.isfinite(err_rel_lin_sys)) 
-                 & (err_rel_lin_sys < LIN_TOL))
-    jax.lax.cond(~iter_okay,
-                 lambda _: jax.debug.print('WARNING: GMRES relative residual {res:.5e} '
-                                           'exceeds tolerance {tol:.5e}, '
-                                           '||delta||_inf = {delta_norm}',
-                                           res=err_rel_lin_sys,
-                                           tol=LIN_TOL,
-                                           delta_norm=jnp.max(jnp.abs(delta))
-                                           ),
-                 lambda _: None,
-                 operand=None
-                 )
+    iter_okay = jnp.all(jnp.isfinite(delta)) & jnp.all(jnp.isfinite(err_rel_lin_sys)) 
+    lin_sol_okay = (err_rel_lin_sys < LIN_TOL)
+    
     # use an under-relaxed version of Newton's method with an adaptive URF
     # max residual before Newton correction
     err_old = jnp.max(jnp.abs(res_int))
+    
+    def print_linear_system_warning(_):
+        # residual of the PRECONDITIONED linear system solved by GMRES
+        res_prec_sys = apply_preconditioner(res_lin_sys)
+        err_rel_lin_prec = jnp.linalg.norm(res_prec_sys) / jnp.maximum(jnp.linalg.norm(RHS_precond), 1e-30)
+        jax.debug.print(f'{Fore.YELLOW}GMRES relative residual {{res:.5e}} '
+                        'exceeds linear system tolerance {tol:.5e}, '
+                        '||delta||_inf = {delta_norm}\n'
+                        '(Preconditioned relative residual: {res_prec:.5e})'
+                        f'{Style.RESET_ALL}',
+                        res=err_rel_lin_sys,
+                        tol=LIN_TOL,
+                        delta_norm=jnp.max(jnp.abs(delta)),
+                        res_prec=err_rel_lin_prec
+                        )
+    jax.lax.cond(~lin_sol_okay, 
+                 print_linear_system_warning, lambda _: None, operand=None)
     
     def Newton_backtrack(_):
         # the iteration index must always be provided as 1st argument
@@ -326,8 +335,11 @@ def Newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
         err_dampened = jnp.where(accepted, err_accepted, jnp.inf)
         return U_dampened, err_dampened
 
-    # d not apply a correction if the linear solve failed badly
-    u_new, error = jax.lax.cond(iter_okay, Newton_backtrack, lambda _: (u, jnp.inf),
+    # reject the solution entirely if the solution if non-finite, but apply
+    # Newton backtracking even if the tolerance of the original linear system
+    # is not within the desired one
+    u_new, error = jax.lax.cond(iter_okay, 
+                                Newton_backtrack, lambda _: (u, jnp.inf),
                                 operand=None)
     
     return u_new, error
@@ -336,9 +348,8 @@ def Newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
 # NB: since tol and k_max are NOT static, they can be changed without having 
 # to recompile the function
 @partial(jax.jit, static_argnames=('nu', 'beta_fun', 'GMRES_RESTART'))
-def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max,
-                     theta=None, beta_fun=None, GMRES_TOL=1e-6,
-                     GMRES_RESTART=30, GMRES_MAX_ITER=10):
+def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max, GMRES_TOL,
+                     theta=None, beta_fun=None, GMRES_RESTART=30, GMRES_MAX_ITER=10):
     """
     Compiled Newton and time loops, viscosity must NOT depend on u_xx. 
     Beta correction can be a function of x, t, u. If beta = beta(x,t) only, a
@@ -530,9 +541,9 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRIT
     # compiled function
     jax.lax.cond(jnp.any(failed), 
                  # jax.debug.print() replaces print() in JIT-compiled functions
-                 lambda _: jax.debug.print(
-                         'WARNING: {N} time steps did not converge',
-                         N=jnp.count_nonzero(failed)),
+                 lambda _: jax.debug.print(f'{Fore.YELLOW}{{N}} time steps did '
+                                           f'not converge {Style.RESET_ALL}',
+                                           N=jnp.count_nonzero(failed)),
                  lambda _: None,
                  operand=None
                  )
