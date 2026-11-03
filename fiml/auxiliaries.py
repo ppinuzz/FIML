@@ -288,3 +288,15 @@ def save_dict_to_hdf5(data, group_obj):
             group_obj.create_dataset(key, data=h5py.Empty('f'))
         else:
             group_obj.create_dataset(key, data=data[key])
+
+def print_optimiser_info(opts):
+    text = [f"Optimiser        : {opts['optimiser']}"]
+    match opts['optimiser'].lower():
+        case 'bfgs':
+            pass
+        case 'adam' | 'amsgrad':
+            text += [f"Learning rate    : {opts['learning_rate']}",
+                     f"Max. iterations  : {opts['max_iterations']}"]
+        case _:
+            raise ValueError(f"Unknown adaptive optimiser '{opts['optimiser']}'")
+    print('\n'.join(text))

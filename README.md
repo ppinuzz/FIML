@@ -4,9 +4,14 @@ Create the `FIML` enviroment:
 ```
 mamba create --name FIML python=3.13.2 numpy=2.2.4 matplotlib=3.10.1 prettytable=3.16.0 scipy=1.15.2 colorama=0.4.6 pyyaml=6.0.2 pandas=3.0.6 spyder-kernels=3.0 h5py=3.16.0
 ```
-Install JAX separately with
+Install JAX and Optax separately with (on Windows)
 ```
 pip install -U jax
+pip install optax
+```
+On Linux, just use
+```
+mamba install jaxlib
 ```
 
 ## $\beta$ model available
