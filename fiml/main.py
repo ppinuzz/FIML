@@ -350,6 +350,7 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
                                             beta_fun, nu, x_mesh, t_mesh,
                                             u_IC, u0, uL, STEADY, out_dir=None)
     beta_r = beta_fun(theta_MAP, u=sol_MAP)
+    aux.print_theta(theta_MAP, theta_prior, STEADY, t_mesh=None, t=None)
     
     start_time = perf_counter()
     cost_and_jacobian(theta_MAP)

@@ -17,6 +17,7 @@ from colorama import Fore, Style, just_fix_windows_console
 # call it once on Windows to fix ANSI coloured text in terminals
 # (does nothing on other OS's)
 just_fix_windows_console()
+from prettytable import PrettyTable
 
 
 def warning(message):
@@ -340,4 +341,33 @@ def generate_mesh(input_data):
                 't': t_mesh
                 }
     return mesh
-        
+
+
+def print_theta(theta_MAP, theta_prior, STEADY, t_mesh=None, t=None):
+    # theta is a 2D matrix: a row vector of column vectors
+    # [theta(t^1), ..., theta(t^k)]
+    # in 1D, it's a single column => make sure that there's a 2nd dimension
+    # to avoid breaking the indexing
+    theta_prior = jnp.atleast_2d(theta_prior)
+    theta_MAP = jnp.atleast_2d(theta_MAP)
+    # if 1D, (N,) -> (1,N), but for consistency it should be (N,1)
+    if theta_prior.shape[0] == 1:
+        theta_prior = theta_prior.T
+    if theta_MAP.shape[0] == 1:
+        theta_MAP = theta_MAP.T
+    
+    if STEADY:
+        time_str = ''
+        idx_time = -1
+    else:
+        if t < t_mesh[0] or t > t_mesh[-1]:
+            raise ValueError('The given time instant does not lie within the time mesh!')
+        idx_time = jnp.argmin(jnp.abs(t_mesh - t))
+        time_str = f' at t = {t_mesh[idx_time]} s'
+    
+    theta_report = PrettyTable()
+    theta_report.title = f'Theta coefficients{time_str}'
+    theta_report.field_names = ['Component (n-th)', 'theta_prior', 'theta_MAP']
+    for i in range(theta_MAP.shape[0]):
+        theta_report.add_row([i+1, f'{theta_prior[i,idx_time]:+.5e}', f'{theta_MAP[i,idx_time]:+.5e}'])
+    check_msg(theta_report.get_string())
