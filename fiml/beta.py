@@ -13,7 +13,7 @@ import jax.numpy as jnp
 import fiml.auxiliaries as aux
 
 
-def read_beta_options(input_data):
+def read_beta_options(opts):
     # DEFAULT VALUES
     # used in beta = beta_ref + ...
     beta_ref = 1
@@ -27,19 +27,19 @@ def read_beta_options(input_data):
                  }
     # overwrite default values, if given
     for key in beta_opts:
-        if key in input_data and input_data[key] is not None:
-            beta_opts[key] = input_data[key]
+        if key in opts and opts[key] is not None:
+            beta_opts[key] = opts[key]
     
-    beta_opts['model'] = input_data['beta_type']
+    beta_opts['model'] = opts['type']
     match beta_opts['model']:
         case 'BxBt' | 'BxBt_softplus' | 'BxBt_exp':
-            beta_opts['N_basis_x'] = int(input_data['num_basis_functions_x'])
-            beta_opts['N_basis_t'] = int(input_data['num_basis_functions_t'])
+            beta_opts['N_basis_x'] = int(opts['num_basis_functions_x'])
+            beta_opts['N_basis_t'] = int(opts['num_basis_functions_t'])
         case 'RBF_Gauss_x' | 'RBF_Gauss_u' | 'RBF_Gauss_x_softplus' | 'RBF_Gauss_u_softplus':
-            beta_opts['num_RBF'] = int(input_data['num_RBF'])
+            beta_opts['num_RBF'] = int(opts['num_RBF'])
         case 'RBF_Gauss_x_poly':
-            beta_opts['num_RBF'] = int(input_data['num_RBF'])
-            beta_opts['poly_deg'] = jnp.asarray(input_data['poly_degrees_bases'])
+            beta_opts['num_RBF'] = int(opts['num_RBF'])
+            beta_opts['poly_deg'] = jnp.asarray(opts['poly_degrees_bases'])
         case _:
             raise ValueError(f"Unknown beta model '{beta_opts['model']}'")
     return beta_opts
