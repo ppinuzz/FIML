@@ -354,7 +354,7 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     start_time = perf_counter()
     cost_and_jacobian(theta_MAP)
     t_elapsed = perf_counter() - start_time
-    print(f'Time required to evaluate grad(J): {t_elapsed:.3e} s')
+    print(f'Time required to evaluate cost function jacobian: {t_elapsed:.3e} s')
     
     aux.save_sampling(out_file, 'MAP', comprex_opts, theta_MAP, sol_MAP, 
                       max_res_MAP, success_MAP, beta_r, key_random=None)
@@ -402,6 +402,8 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
             H_MAP = H_MAP_full
         case _:
             raise ValueError(f"Unknown Hessian matrix option '{hessian}'")
+    t_elapsed = perf_counter() - start_time
+    print(f'Time required to evaluate cost function hessian: {t_elapsed:.3e} s')
     aux.check_hessian(H_MAP)
     # rather than inverting H with inv(H), calculate is solving the linear
     # system H*H_inv = I

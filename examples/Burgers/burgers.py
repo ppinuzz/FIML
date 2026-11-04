@@ -282,12 +282,10 @@ def Newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
         err_rel_lin_prec = jnp.linalg.norm(res_prec_sys) / jnp.maximum(jnp.linalg.norm(RHS_precond), 1e-30)
         jax.debug.print(f'{Fore.YELLOW}GMRES relative residual {{res:.5e}} '
                         'exceeds linear system tolerance {tol:.5e}, '
-                        '||delta||_inf = {delta_norm}\n'
-                        '(Preconditioned relative residual: {res_prec:.5e})'
+                        'preconditioned relative residual: {res_prec:.5e}'
                         f'{Style.RESET_ALL}',
                         res=err_rel_lin_sys,
                         tol=LIN_TOL,
-                        delta_norm=jnp.max(jnp.abs(delta)),
                         res_prec=err_rel_lin_prec
                         )
     jax.lax.cond(~lin_sol_okay, 
