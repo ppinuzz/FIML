@@ -228,7 +228,6 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
         if fig_file is not None:
             aux.save_fig(fig_beta, f'{fig_file.name}_{beta_labels[i]}', fig_file.parent)
         
-        ax_err.legend()
         fig_err.show()
         if fig_file is not None:
             aux.save_fig(fig_err, f'{fig_file.name}_{beta_labels[i]}_error', fig_file.parent)
