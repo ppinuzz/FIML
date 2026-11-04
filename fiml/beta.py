@@ -87,15 +87,18 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             print('Calculating Gaussian radial basis functions matrix Phi(x)...')
             x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['num_RBF'])
             # j-th column is the vector of values of phi_j(x)
-            Phi = jax.vmap(lambda xc: jnp.exp(-opts['shape_factor']*(x_mesh-xc)**2),
-                           in_axes=0, out_axes=1)(x_c)
-            N_params = opts['num_RBF']
-            params['Phi'] = Phi
+            Phi_RBF = jax.vmap(lambda xc: jnp.exp(-opts['shape_factor']*(x_mesh-xc)**2),
+                               in_axes=0, out_axes=1)(x_c)
             print('Calculating polynomial basis functions matrix P(x)...')
+            params['Phi_RBF'] = Phi_RBF
             
             P = jax.vmap(lambda p: x_mesh**p,
                          in_axes=0, out_axes=1)(opts['poly_deg'])
             params['P'] = P
+            
+            Phi = jnp.column_stack((Phi_RBF, P))
+            params['Phi'] = Phi
+            N_params = Phi.shape[1]
         case _:
             raise ValueError(f"Unknown beta model '{opts['model']}'")
     print(f'Number of theta parameters to identify: {N_params}')
@@ -130,7 +133,7 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             DEPENDS_ON_U = True
         case 'RBF_Gauss_x_poly':
             beta = lambda theta, u=None, x=None, t=None: _beta_RBF_Gauss_x_poly_x(
-                        theta, Phi, t_mesh.size, P, opts['beta_ref'])
+                        theta, Phi_RBF, t_mesh.size, P, opts['beta_ref'])
         case _:
             raise ValueError(f"Unknown beta model '{opts['model']}'")
     
@@ -215,10 +218,12 @@ def _beta_poly_x(theta_r, P, beta_ref):
     return beta_r
 
 def _beta_RBF_Gauss_x_poly_x(theta_r, Phi, N_t, P, beta_ref):
+    N_RBF = Phi.shape[1]
+    # theta = [theta_RBF, eta_poly] => split it
     # sum_k phi_k(x) * theta_k, where phi_k = RBF Gauss
-    z_Gauss = _beta_RBF_Gauss_x(theta_r, Phi, N_t, beta_ref=0)
+    z_Gauss = _beta_RBF_Gauss_x(theta_r[0:N_RBF], Phi, N_t, beta_ref=0)
     # sum_p x^p eta_p
-    z_poly = _beta_poly_x(theta_r, P, beta_ref=0)
+    z_poly = _beta_poly_x(theta_r[N_RBF:], P, beta_ref=0)
     beta_r = beta_ref + z_Gauss + z_poly
     return beta_r
 
