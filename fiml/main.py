@@ -460,8 +460,28 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     # => block the last one, so that the user can inspect them before closing 
     # them and allowing the function to return
     if PLOT:
-        aux.warning('Close all figures to terminate the execution')
-        plt.show(block=True)
+        aux.warning("Close all figures to terminate the execution or generate an exit.fiml file")
+        
+        exit_file = Path('exit.fiml')
+        def check_exit_file():
+            if exit_file.is_file():
+                plt.close('all')
+                return False
+            return True
+
+        # timer associated with the GUI event loop
+        # (GUI event loop is needed to keep track of events like closing a figure)
+        fig = plt.gcf()
+        timer = fig.canvas.new_timer(interval=500)  # 500 ms
+        timer.add_callback(check_exit_file)
+
+        # start the timer and block execution
+        timer.start()
+        try:
+            plt.show(block=True)
+        finally:
+            timer.stop()
+
 
 
 #%% POSTPROCESSING
