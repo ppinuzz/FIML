@@ -112,7 +112,7 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
                         theta, B_x, B_t, opts['beta_ref'])
         case 'BxBt_softplus':
             beta = lambda theta, u=None, x=None, t=None: _beta_BxBt_softplus(
-                        theta, B_x, B_t, opts['beta_min'])
+                        theta, B_x, B_t, opts['beta_ref'], opts['beta_min'])
         case 'BxBt_exp':
             beta = lambda theta, u=None, x=None, t=None: _beta_BxBt_exp(
                         theta, B_x, B_t, opts['beta_ref'])
@@ -158,9 +158,9 @@ def _beta_BxBt(theta_r, B_x, B_t, beta_ref):
     beta_r = beta_ref + B_x.T @ Theta_r @ B_t
     return beta_r
 
-def _beta_BxBt_softplus(theta_r, B_x, B_t, beta_min):
+def _beta_BxBt_softplus(theta_r, B_x, B_t, beta_ref, beta_min):
     z = _beta_BxBt(theta_r, B_x, B_t, beta_ref=0)
-    beta_r = _sofplus_positivity_preserving(z, beta_min)
+    beta_r = _sofplus_positivity_preserving(z, beta_min, beta_ref)
     return beta_r
 
 def _beta_BxBt_exp(theta_r, B_x, B_t, beta_ref):
@@ -205,12 +205,12 @@ def _RBF_Gauss_u_Phi(x, x_c, u, K):
 
 def _beta_RBF_Gauss_x_softplus(theta_r, Phi, N_t, beta_ref, beta_min):
     z = _beta_RBF_Gauss_x(theta_r, Phi, N_t, beta_ref=0)
-    beta_r = _sofplus_positivity_preserving(z, beta_min)
+    beta_r = _sofplus_positivity_preserving(z, beta_min, beta_ref)
     return beta_r
 
 def _beta_RBF_Gauss_u_softplus(theta_r, x_c, x, u, beta_ref, K, beta_min):
     z = _beta_RBF_Gauss_u(theta_r, x_c, x, u, beta_ref=0, K=K)
-    beta_r = _sofplus_positivity_preserving(z, beta_min)
+    beta_r = _sofplus_positivity_preserving(z, beta_min, beta_ref)
     return beta_r
 
 def _beta_poly_x(theta_r, P, beta_ref):
@@ -227,8 +227,10 @@ def _beta_RBF_Gauss_x_poly_x(theta_r, Phi, N_t, P, beta_ref):
     beta_r = beta_ref + z_Gauss + z_poly
     return beta_r
 
-def _sofplus_positivity_preserving(z, beta_min):
-    beta = beta_min + (1 - beta_min)*jax.nn.softplus(z)/jnp.log(2)
+
+def _sofplus_positivity_preserving(z, beta_min, beta_ref):
+    # beta(z = 0) = beta_ref, and z(theta = 0) = 0
+    beta = beta_min + (beta_ref - beta_min)*jax.nn.softplus(z)/jnp.log(2)
     return beta
 
 def _invert_softplus(beta, beta_min):
