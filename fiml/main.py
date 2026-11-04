@@ -532,7 +532,7 @@ def postprocessing(sol_file, exp_file, out_dir, beta_exact=None, sol_exact=None)
     
     # check if the parametrisation is able to reproduce the exact beta
     if beta_exact is not None and sol_exact is not None:
-        beta_opts = betamod.read_beta_options(input_data)
+        beta_opts = betamod.read_beta_options(input_data['beta'])
         post.check_parametrisation_fitness(sol_exact, beta_exact['beta'], beta_opts,
                                            fig_file=out_dir/'checkBetaParam')
     

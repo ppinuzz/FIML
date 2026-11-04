@@ -20,7 +20,7 @@ call "%USERPROFILE%\miniforge3\Scripts\activate.bat" "%ENV_NAME%"
 ::	%~p0	\PhD\myCode\
 ::	%~dp0	C:\PhD\myCode\
 ::cd /d "%~dp0"
-cd /d "%~dp0%WORK_DIR%"
+cd /d "%~dp0%RELATIVE_WORK_DIR%"
 
 :: open Windows command prompt and keep it open (/k)
 :: (Miniforge prompt is just Windows cmd called after executing the activation scrip)
