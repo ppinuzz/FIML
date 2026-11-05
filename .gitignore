@@ -1,13 +1,13 @@
-# ---------------------------------------------------------------------
-#                                 PYTHON
-# ---------------------------------------------------------------------
-
-# byte-compiled / optimized / DLL files
+# Python byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
 
-# ---------------------------------------------------------------------
-#                                 C
-# ---------------------------------------------------------------------
+# other files
 *.exe
+*.log
+# stop file used to close all figures and terminate execution programmatically
+**/exit.fiml
+
+# output directories of the RBF Gaussian parametrisations
+examples/Burgers/solution_FIML/RBF_Gauss*
