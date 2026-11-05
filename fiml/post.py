@@ -18,6 +18,10 @@ def check_experiments_in_sigma_band(sol, exp, x, t, x_exp, t_exp, ax_sol=2,
                                     N_sigma=2, t_plot=None, fig_file=None, 
                                     PLOT=True, VIDEO=False):
     sol = jnp.asarray(sol)
+    # HACK: assicurati nel solver the la dimensione sia (Nt, Nx, N_sample),
+    # non qui
+    if sol.ndim != 3:
+        sol = sol[jnp.newaxis, ...]
     # for each space-time point, calculate the sample mean of the solutions
     # obtained solving the equation for each sample
     # (1st index: space, 2nd index: time, 3rd index: sampling)
@@ -240,6 +244,12 @@ def compare_prior_posterior(prior, posterior, exp, x, t, x_exp, t_exp, ax_sol=2,
                             N_sigma=2, t_plot=None, fig_file=None, 
                             PLOT=True, VIDEO=False):
     
+    # HACK: assicurati nel solver the la dimensione sia (Nt, Nx, N_sample),
+    # non qui
+    if prior.ndim != 3:
+        prior = prior[jnp.newaxis, ...]
+    if posterior.ndim != 3:
+        posterior = posterior[jnp.newaxis, ...]
     # for each space-time point, calculate the sample mean of the solutions
     # obtained solving the equation for each sample
     # (1st index: space, 2nd index: time, 3rd index: sampling)

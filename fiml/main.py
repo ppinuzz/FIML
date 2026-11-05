@@ -515,9 +515,13 @@ def postprocessing(sol_file, exp_file, out_dir, beta_exact=None, sol_exact=None)
                         'N_sigma': 2,
                         't_plot': exp_data['t'][-1]
                         }
-    post.check_experiments_in_sigma_band(prior_data['solution'], **check_sigma_opts,
-                                         fig_file=out_dir/'meanSigmaExpPrior', )
-    post.check_experiments_in_sigma_band(posterior_data['solution'], **check_sigma_opts,
+    # remove failed simulations
+    # (use name, to unpack the tuple composed of only 1 element here)
+    prior_valid, = fiml.handle_failed_runs((prior_data['solution']), prior_data['success'])
+    post.check_experiments_in_sigma_band(prior_valid, **check_sigma_opts,
+                                         fig_file=out_dir/'meanSigmaExpPrior')
+    posterior_valid, = fiml.handle_failed_runs((posterior_data['solution']), posterior_data['success'])
+    post.check_experiments_in_sigma_band(posterior_valid, **check_sigma_opts,
                                          fig_file=out_dir/'meanSigmaExpPosterior')
     
     # compare prior, posterior and MAP beta correction to the exact one
@@ -535,6 +539,9 @@ def postprocessing(sol_file, exp_file, out_dir, beta_exact=None, sol_exact=None)
         beta_opts = betamod.read_beta_options(input_data['beta'])
         post.check_parametrisation_fitness(sol_exact, beta_exact['beta'], beta_opts,
                                            fig_file=out_dir/'checkBetaParam')
+    
+    post.compare_prior_posterior(prior_valid, posterior_valid, **check_sigma_opts, 
+                                 fig_file=out_dir/'priorVSposterior')
     
     # keep the terminal on hold to avoid closing figures immediately
     aux.warning('Close all figures to terminate the execution')
