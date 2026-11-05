@@ -223,15 +223,16 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
                 plt.show()
 
     if PLOT:
+        beta_name = f'_{beta_labels[i]}'
         ax_beta.legend()
         fig_beta.show()
         if fig_file is not None:
-            aux.save_fig(fig_beta, f'{fig_file.name}_{beta_labels[i]}', fig_file.parent)
+            
+            aux.save_fig(fig_beta, f'{fig_file.name}{beta_name}', fig_file.parent)
         
-        ax_err.legend()
         fig_err.show()
         if fig_file is not None:
-            aux.save_fig(fig_err, f'{fig_file.name}_{beta_labels[i]}_error', fig_file.parent)
+            aux.save_fig(fig_err, f'{fig_file.name}{beta_name}_error', fig_file.parent)
         
         
 
@@ -334,7 +335,7 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
             #   beta = e^z
             # shape: (Nx, Nt)
             z_exact = jnp.log(beta_exact)
-        case 'BxBt' | 'RBF_Gauss_x' | 'RBF_Gauss_u':
+        case 'BxBt' | 'RBF_Gauss_x' | 'RBF_Gauss_u' | 'RBF_Gauss_x_poly':
             # shape: (Nx, Nt)
             z_exact = beta_exact - opts['beta_ref']
         case _:
@@ -365,7 +366,7 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
             # Theta is a column vector of row vector => unravel in row-major
             # order (C-style)
             theta = jnp.ravel(Theta, order='C')
-        case 'RBF_Gauss_x' | 'RBF_Gauss_x_softplus':
+        case 'RBF_Gauss_x' | 'RBF_Gauss_x_softplus' | 'RBF_Gauss_x_poly':
             if not STEADY:
                 raise ValueError('RBF_Gauss_x and RBF_Gauss_x_softplus are only '
                                  'meant for STEADY problems!')
@@ -439,3 +440,26 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
         plt.show(block=False)
         if fig_file is not None:
             aux.save_fig(fig, fig_file.name, fig_file.parent)
+
+
+def plot_convergence_history(opt_obj, fig_file=None):
+    # iter = 0 is the initial guess
+    iter_ax = jnp.arange(0, opt_obj.nit+1, step=1)
+    
+    fig_grad = plt.figure()
+    plt.semilogy(iter_ax, opt_obj.history['grad_norm'], label='Exact')
+    plt.xlabel('Iteration')
+    plt.ylabel(r'$||\nabla\mathcal{J}(\theta)||$')
+    plt.autoscale(enable=True, axis='x', tight=True)
+    plt.show(block=False)
+    if fig_file is not None:
+        aux.save_fig(fig_grad, fig_file.name, fig_file.parent)
+    
+    fig_cost = plt.figure()
+    plt.plot(iter_ax, opt_obj.history['cost'], label='Exact')
+    plt.xlabel('Iteration')
+    plt.ylabel(r'$\mathcal{J}(\theta)$')
+    plt.autoscale(enable=True, axis='x', tight=True)
+    plt.show(block=False)
+    if fig_file is not None:
+        aux.save_fig(fig_cost, f'{fig_file.name}_cost', fig_file.parent)

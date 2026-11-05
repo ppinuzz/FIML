@@ -81,7 +81,7 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
 
 def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior, 
              N_sampling_prior, N_sampling_post, SEED, sigma2_obs, N_WORKERS, RUN_PARALLEL,
-             solver_fun, CHECK=False, VIDEO=False, beta_exact=None, BATCH=False,
+             solver_fun, optimiser_opts, CHECK=False, VIDEO=False, beta_exact=None, BATCH=False,
              IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True, STEADY=True, hessian='full',
              input_file=None):
     
@@ -210,8 +210,8 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     beta_fun, beta_params = betamod.parametrise_beta(beta_opts, x_mesh, t_mesh, STEADY)
     N_theta = beta_params['N_params']
     
-    print('Available data points: {sol_exp.size}')
-    print('Unknown parameters: {N_theta}')
+    print(f'Available data points: {sol_exp.size}')
+    print(f'Unknown parameters: {N_theta}')
     if sol_exp.size < N_theta:
         aux.warning(f'Under-determined system: {N_theta} to find, but only '
                     f'{sol_exp.size} data points')
@@ -303,32 +303,44 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
         # 2nd argument is the success flag, 1st is the numerical cost
         return cost_and_status(theta)[0]
     
+    def cost_with_aux(theta):
+        cost, success = cost_and_status(theta)
+        return cost, (cost, success)
+
     @jax.jit
     def cost_and_jacobian(theta):
-        cost, success = cost_and_status(theta)
-        cost_jac = jax.jacfwd(J_cost_fun)(theta)
-        return cost, cost_jac, success
+        # has_aux=True specifies that the function returns (f(theta), auxiliaries)
+        # and that it should be differentiated only w.r.t. the 1st output
+        # (the actual numerical output)
+        grad, (cost, success) = jax.jacfwd(cost_with_aux, has_aux=True)(theta)
+        return cost, grad, success
     
-    # convert output types from JAX to SciPy
-    def obj_fun_and_grad(theta):
-        # JAX input -> NumPy output
-        cost, jac, success = cost_and_jacobian(jnp.asarray(theta))
-        
-        if not success:
-            raise RuntimeError(f'Forward solver failed at theta = {theta}')
-        if ~jnp.isfinite(cost):
-            raise RuntimeError(f'Non-finite cost function at theta = {theta}')
-        if ~jnp.all(jnp.isfinite(jac)):
-            raise RuntimeError(f'Non-finite cost function jacobian at theta = {theta}')
-        
-        return float(cost), np.asarray(jac)
     
-    # initial guess: no correction needed, theta = 0 (i.e. beta = 1)
-    print('Solving the optimisation problem argmin(J(theta)) to find '
-          'maximum-a-posteriori (MAP) value...')
+    print('Minimising the cost function J(theta) to find maximum-a-posteriori '
+          '(MAP) value...')
+    aux.print_optimiser_info(optimiser_opts)
     start_time = perf_counter()
-    opt = sciopt.minimize(obj_fun_and_grad, x0=np.zeros(shape=(N_theta,)), 
-                          method='BFGS', jac=True)
+    if optimiser_opts['optimiser'].lower() == 'bfgs':
+        # convert output types from JAX to SciPy
+        def obj_fun_and_grad(theta):
+            # JAX input -> NumPy output
+            cost, jac, success = cost_and_jacobian(jnp.asarray(theta))
+            if not success:
+                raise RuntimeError(f'Forward solver failed at theta = {theta}')
+            if ~jnp.isfinite(cost):
+                raise RuntimeError(f'Non-finite cost function at theta = {theta}')
+            if ~jnp.all(jnp.isfinite(jac)):
+                raise RuntimeError(f'Non-finite cost function jacobian at theta = {theta}')
+            return float(cost), np.asarray(jac)
+
+        # initial guess: no correction needed, theta = 0 (i.e. beta = 1)
+        opt = sciopt.minimize(obj_fun_and_grad, x0=np.zeros(shape=(N_theta,)), 
+                              method='BFGS', jac=True)
+    else:
+        opt = fiml.minimise_cost_function(cost_and_jacobian, x0=jnp.zeros(shape=(N_theta,)),
+                                          method=optimiser_opts['optimiser'],
+                                          learn_rate=optimiser_opts['learning_rate'],
+                                          max_iter=optimiser_opts['max_iterations'])
     t_elapsed = perf_counter() - start_time
     print(f'Optimisation problem solved in {t_elapsed:.2f} s')
     aux.check_optimiser_results(opt)
@@ -338,6 +350,12 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
                                             beta_fun, nu, x_mesh, t_mesh,
                                             u_IC, u0, uL, STEADY, out_dir=None)
     beta_r = beta_fun(theta_MAP, u=sol_MAP)
+    aux.print_theta(theta_MAP, theta_prior, STEADY, t_mesh=None, t=None)
+    
+    start_time = perf_counter()
+    cost_and_jacobian(theta_MAP)
+    t_elapsed = perf_counter() - start_time
+    print(f'Time required to evaluate cost function jacobian: {t_elapsed:.3e} s')
     
     aux.save_sampling(out_file, 'MAP', comprex_opts, theta_MAP, sol_MAP, 
                       max_res_MAP, success_MAP, beta_r, key_random=None)
@@ -347,6 +365,9 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
                                 x_mesh, t_mesh, beta_exact['x'], beta_exact['t'], 
                                 t_plot=beta_exact['t'][-1], fig_file=out_dir/'checkBeta', 
                                 PLOT=PLOT, VIDEO=VIDEO)
+    
+    if PLOT:
+        post.plot_convergence_history(opt, fig_file=out_dir/'optimiserHistory')
     
     
     #%% CHECK MAP SOLUTION VS BASELINE
@@ -382,6 +403,8 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
             H_MAP = H_MAP_full
         case _:
             raise ValueError(f"Unknown Hessian matrix option '{hessian}'")
+    t_elapsed = perf_counter() - start_time
+    print(f'Time required to evaluate cost function hessian: {t_elapsed:.3e} s')
     aux.check_hessian(H_MAP)
     # rather than inverting H with inv(H), calculate is solving the linear
     # system H*H_inv = I
@@ -437,8 +460,28 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     # => block the last one, so that the user can inspect them before closing 
     # them and allowing the function to return
     if PLOT:
-        aux.warning('Close all figures to terminate the execution')
-        plt.show(block=True)
+        aux.warning("Close all figures to terminate the execution or generate an exit.fiml file")
+        
+        exit_file = Path('exit.fiml')
+        def check_exit_file():
+            if exit_file.is_file():
+                plt.close('all')
+                return False
+            return True
+
+        # timer associated with the GUI event loop
+        # (GUI event loop is needed to keep track of events like closing a figure)
+        fig = plt.gcf()
+        timer = fig.canvas.new_timer(interval=500)  # 500 ms
+        timer.add_callback(check_exit_file)
+
+        # start the timer and block execution
+        timer.start()
+        try:
+            plt.show(block=True)
+        finally:
+            timer.stop()
+
 
 
 #%% POSTPROCESSING
@@ -489,7 +532,7 @@ def postprocessing(sol_file, exp_file, out_dir, beta_exact=None, sol_exact=None)
     
     # check if the parametrisation is able to reproduce the exact beta
     if beta_exact is not None and sol_exact is not None:
-        beta_opts = betamod.read_beta_options(input_data)
+        beta_opts = betamod.read_beta_options(input_data['beta'])
         post.check_parametrisation_fitness(sol_exact, beta_exact['beta'], beta_opts,
                                            fig_file=out_dir/'checkBetaParam')
     

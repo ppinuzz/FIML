@@ -17,6 +17,7 @@ from colorama import Fore, Style, just_fix_windows_console
 # call it once on Windows to fix ANSI coloured text in terminals
 # (does nothing on other OS's)
 just_fix_windows_console()
+from prettytable import PrettyTable
 
 
 def warning(message):
@@ -288,3 +289,85 @@ def save_dict_to_hdf5(data, group_obj):
             group_obj.create_dataset(key, data=h5py.Empty('f'))
         else:
             group_obj.create_dataset(key, data=data[key])
+
+
+def print_optimiser_info(opts):
+    text = [f"Optimiser        : {opts['optimiser']}"]
+    match opts['optimiser'].lower():
+        case 'bfgs':
+            pass
+        case 'adam' | 'amsgrad':
+            text += [f"Learning rate    : {opts['learning_rate']}",
+                     f"Max. iterations  : {opts['max_iterations']}"]
+        case _:
+            raise ValueError(f"Unknown adaptive optimiser '{opts['optimiser']}'")
+    print('\n'.join(text))
+
+
+def generate_mesh(input_data):
+    mesh_opts = input_data['mesh']
+    sol_file = input_data['files']['solution']
+    
+    with h5py.File(sol_file, 'r') as file:
+        # file['settings']['L']     => HDF5 dataset
+        # file['settings']['L'][()] => content of the dataset
+        L = file['settings']['L'][()]
+        T = file['settings']['T'][()]
+        if mesh_opts['dx'] is None:
+            print('No x-spacing provided, reading exact solution files for mesh settings...')
+            x_mesh = jnp.asarray(file['mesh']['x'])
+        else:
+            print(f'Calculating space mesh in domain [0, {L}] with discretisation '
+                  f"step dx = {mesh_opts['dx']}...")
+            # N elements => N+1 nodes
+            N_x = int(L / mesh_opts['dx']) + 1
+            x_mesh = jnp.linspace(0, L, N_x)
+        
+        if mesh_opts['dt'] is None:
+            if input_data['steady']:
+                print('No time step provided, reading exact solution files for mesh settings...')
+                t_mesh = jnp.asarray(file['mesh']['t'])
+            else:
+                warning('Steady simulation, time will be ignored and set to 0 arbitrarily...')
+                t_mesh = jnp.array([0])
+        else:
+            print(f'Calculating time step in domain [0, {T}] with time step '
+                  f"dx = {mesh_opts['dt']}...")
+            # N elements => N+1 nodes
+            N_t = int(T / mesh_opts['dt']) + 1
+            t_mesh = jnp.linspace(0, T, N_t)
+        
+        mesh = {'x': x_mesh,
+                't': t_mesh
+                }
+    return mesh
+
+
+def print_theta(theta_MAP, theta_prior, STEADY, t_mesh=None, t=None):
+    # theta is a 2D matrix: a row vector of column vectors
+    # [theta(t^1), ..., theta(t^k)]
+    # in 1D, it's a single column => make sure that there's a 2nd dimension
+    # to avoid breaking the indexing
+    theta_prior = jnp.atleast_2d(theta_prior)
+    theta_MAP = jnp.atleast_2d(theta_MAP)
+    # if 1D, (N,) -> (1,N), but for consistency it should be (N,1)
+    if theta_prior.shape[0] == 1:
+        theta_prior = theta_prior.T
+    if theta_MAP.shape[0] == 1:
+        theta_MAP = theta_MAP.T
+    
+    if STEADY:
+        time_str = ''
+        idx_time = -1
+    else:
+        if t < t_mesh[0] or t > t_mesh[-1]:
+            raise ValueError('The given time instant does not lie within the time mesh!')
+        idx_time = jnp.argmin(jnp.abs(t_mesh - t))
+        time_str = f' at t = {t_mesh[idx_time]} s'
+    
+    theta_report = PrettyTable()
+    theta_report.title = f'Theta coefficients{time_str}'
+    theta_report.field_names = ['Component (n-th)', 'theta_prior', 'theta_MAP']
+    for i in range(theta_MAP.shape[0]):
+        theta_report.add_row([i+1, f'{theta_prior[i,idx_time]:+.5e}', f'{theta_MAP[i,idx_time]:+.5e}'])
+    check_msg(theta_report.get_string())

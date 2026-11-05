@@ -115,13 +115,13 @@ def residual(u, u_old, x, t, dt, nu, beta_t):
 # JIT-compile the function, including in the compiled object the function nu()
 # (if nu is changed, then this function will be recompiled)
 # EQUIVALENT FORM:
-#   newton_step_tridiagonal = jax.jit(newton_step_tridiagonal, 
+#   Newton_step_tridiagonal = jax.jit(Newton_step_tridiagonal, 
 #                                       static_argnames=('nu', )
 #                                   )
 # => the decorator @partial acts as a "lambda function" without altering the
 # syntax of the function definition
 @partial(jax.jit, static_argnames=('nu', ))
-def newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu, beta_t):
+def Newton_step_tridiagonal(u, u_old, x_mesh, t, dt, nu, beta_t):
     # eq. to solve:
     #   du/dt + u du/dx = d(nu*du/dx)/dx
     # same as
@@ -193,9 +193,11 @@ def _jacobian_colouring_tridiag(JdU_fun, N):
     return lower_diag, main_diag, upper_diag
 
 
-@partial(jax.jit, static_argnames=('nu', 'beta_fun', 'GMRES_RESTART'))
-def newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
-                              TOL=1e-6, GMRES_RESTART=30, MAX_ITER=10):
+@partial(jax.jit, static_argnames=('nu', 'beta_fun', 'GMRES_RESTART', 
+                                   'ITER_MAX_BACKTRACK'))
+def Newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
+                       TOL=1e-8, GMRES_RESTART=30, MAX_ITER=10, K=1e-4,
+                       URF_cut=0.5, ITER_MAX_BACKTRACK=20, LIN_TOL=1e-4):
     """Newton step for solution-dependent beta(theta, u)"""
 
     # Original Newton: J(u^k, beta(x,t))(u^k+1 - u_k) = -F(u^k, beta(x,t))
@@ -244,32 +246,99 @@ def newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
         # (e.g. (N,) rather than (N,1), if the input has shape (N,))
         y = jnp.reshape(y, v.shape)
         return y
-
-    delta, _ = jax.scipy.sparse.linalg.gmres(JdU_fun_int, -res_int, M=apply_preconditioner,
+    # pass to JAX's GMRES the preconditions system
+    # (using the M=... keyword argument, the tolerance check is on the non-preconditioned
+    # residuals => if the P^-1 strongly reduced the residual, it could go below
+    # GMRES tolerance and not iterations are performed despite the system not
+    # being solved)
+    # LHS P^-1 * J * du
+    JdU_fun_precond = lambda v: apply_preconditioner(JdU_fun_int(v))
+    # RHS: - P^-1 * F(u), where F(u) = residual(u)
+    RHS_precond = apply_preconditioner(-res_int)
+    #delta, _ = jax.scipy.sparse.linalg.gmres(JdU_fun_int, -res_int, M=apply_preconditioner,
+    #                                         tol=TOL, atol=0.0, restart=GMRES_RESTART,
+    #                                         maxiter=MAX_ITER)
+    # 'incremental' = uses QR decomposition incrementally => allows for early
+    # termination & improves stability
+    # 'batched' = solves least squares problem at each iteration
+    delta, _ = jax.scipy.sparse.linalg.gmres(JdU_fun_precond, RHS_precond,
                                              tol=TOL, atol=0.0, restart=GMRES_RESTART,
-                                             maxiter=MAX_ITER)
-    # check residuals of the linear system J*du = -res
+                                             maxiter=MAX_ITER, solve_method ='incremental')
+    # check residuals of the ORIGINAL linear system J*du = -res
+    # (not the preconditioned one!)
     res_lin_sys = JdU_fun_int(delta) + res_int
     # if the residual is 0, relative error is 0/0 => use max(|res|, 1e-30)
     err_rel_lin_sys = jnp.linalg.norm(res_lin_sys) / jnp.maximum(jnp.linalg.norm(res_int), 1e-30)
-    iter_okay = jnp.isfinite(err_rel_lin_sys) & (err_rel_lin_sys < TOL)
-    jax.lax.cond(~iter_okay,
-                 lambda _: jax.debug.print('WARNING: GMRES relative residual {res:.5e} '
-                                           'exceeds tolerance {tol:.5e}',
-                                           res=err_rel_lin_sys,
-                                           tol=TOL
-                                           ),
-                 lambda _: None,
-                 operand=None
-                 )
-    # 1st and last nodes are set by BCs
-    u_new = u.at[1:-1].add(delta)
-    beta_new = _beta_from_solution(beta_fun, theta, u_new, t)
-    error = jnp.max(
-                jnp.abs(
-                    residual(u_new, u_old, x_mesh, t,dt, nu, beta_new)
-                    )
-                )
+    iter_okay = jnp.all(jnp.isfinite(delta)) & jnp.all(jnp.isfinite(err_rel_lin_sys)) 
+    lin_sol_okay = (err_rel_lin_sys < LIN_TOL)
+    
+    # use an under-relaxed version of Newton's method with an adaptive URF
+    # max residual before Newton correction
+    err_old = jnp.max(jnp.abs(res_int))
+    
+    def print_linear_system_warning(_):
+        # residual of the PRECONDITIONED linear system solved by GMRES
+        res_prec_sys = apply_preconditioner(res_lin_sys)
+        err_rel_lin_prec = jnp.linalg.norm(res_prec_sys) / jnp.maximum(jnp.linalg.norm(RHS_precond), 1e-30)
+        jax.debug.print(f'{Fore.YELLOW}GMRES relative residual {{res:.5e}} '
+                        'exceeds linear system tolerance {tol:.5e}, '
+                        'preconditioned relative residual: {res_prec:.5e}'
+                        f'{Style.RESET_ALL}',
+                        res=err_rel_lin_sys,
+                        tol=LIN_TOL,
+                        res_prec=err_rel_lin_prec
+                        )
+    jax.lax.cond(~lin_sol_okay, 
+                 print_linear_system_warning, lambda _: None, operand=None)
+    
+    def Newton_backtrack(_):
+        # the iteration index must always be provided as 1st argument
+        def backtrack_step(i, state):
+            def evaluate_step(state):
+                URF, U_accepted, err_accepted, already_good = state
+        
+                # under-relaxed Newton step
+                U_under = u_int + URF*delta
+                err_under = jnp.max(jnp.abs(F(U_under)))
+                
+                # if the error doesn't decrease "enough", reduce the URF
+                # (use 1-K*URF, rather than 1-K, to keep the error decrease proportional
+                # to the URF: with very small URF, you cannot ask for a big error
+                # reduction)
+                decreased_err = (jnp.isfinite(err_under) & (err_under <= (1 - K*URF)*err_old))
+                U_accepted = jnp.where(decreased_err, U_under, U_accepted)
+                err_accepted = jnp.where(decreased_err, err_under, err_accepted)
+                # if even after under-relaxing this is not enough, reduce the URF
+                URF = jnp.where(decreased_err, URF, URF_cut*URF)
+        
+                return URF, U_accepted, err_accepted, decreased_err
+            # if state[3] (i.e. the flag decreased_err) is True, then return
+            # the calculated state, as the error decreased with the damping
+            # if False, call evaluate trial, which will recalculate the same
+            # thing, but using the reduced URF
+            step_result = jax.lax.cond(state[3], lambda s: s, evaluate_step, state)
+            return step_result
+        # start applying the under-relaxed Newton correction with URF = 1
+        # (err = inf so that the loop will start, already_good = False since there's
+        # no previous step)
+        state_init = (1.0, u_int, jnp.inf, False)
+        # same as for i in range(0, ITER_MAX_BACKTRACK)
+        _, U_accepted, err_accepted, accepted = jax.lax.fori_loop(0, ITER_MAX_BACKTRACK, 
+                                                        backtrack_step, 
+                                                        state_init)
+    
+        # 1st and last nodes are set by BCs
+        U_dampened = u.at[1:-1].set(U_accepted)
+        # if progressive URF reduction didn't work, flag it as non-converged
+        err_dampened = jnp.where(accepted, err_accepted, jnp.inf)
+        return U_dampened, err_dampened
+
+    # reject the solution entirely if the solution if non-finite, but apply
+    # Newton backtracking even if the tolerance of the original linear system
+    # is not within the desired one
+    u_new, error = jax.lax.cond(iter_okay, 
+                                Newton_backtrack, lambda _: (u, jnp.inf),
+                                operand=None)
     
     return u_new, error
 
@@ -277,9 +346,8 @@ def newton_step_beta_u(u, u_old, x_mesh, t, dt, nu, beta_fun, theta,
 # NB: since tol and k_max are NOT static, they can be changed without having 
 # to recompile the function
 @partial(jax.jit, static_argnames=('nu', 'beta_fun', 'GMRES_RESTART'))
-def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max,
-                     theta=None, beta_fun=None, GMRES_TOL=1e-6,
-                     GMRES_RESTART=30, GMRES_MAX_ITER=10):
+def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max, GMRES_TOL,
+                     theta=None, beta_fun=None, GMRES_RESTART=30, GMRES_MAX_ITER=10):
     """
     Compiled Newton and time loops, viscosity must NOT depend on u_xx. 
     Beta correction can be a function of x, t, u. If beta = beta(x,t) only, a
@@ -303,38 +371,38 @@ def _solve_all_steps(sol, x_mesh, t_mesh, nu, beta, tol, k_max,
         u = u.at[-1].set(uL)
 
         # NB: tol, k_max, ecc. are accessible to the inner functions
-        def continue_newton(state):
+        def continue_Newton(state):
             _, err, iteration = state
             keep_going = (err >= tol) & (iteration < k_max) & jnp.isfinite(err)
             return keep_going
 
-        def update_newton(state):
+        def update_Newton(state):
             u, _, iteration = state
             if beta_fun is None:
                 # beta = beta(x,t) => no need to calculate it at runtime
                 beta_t = beta[:,idx_t]
-                u, err = newton_step_tridiagonal(u, u_old, x_mesh, time, dt, nu, beta_t)
+                u, err = Newton_step_tridiagonal(u, u_old, x_mesh, time, dt, nu, beta_t)
             else:
                 # beta = beta(..., u) => recalculated at each step
-                u, err = newton_step_beta_u(u, u_old, x_mesh, time, dt, nu,
+                u, err = Newton_step_beta_u(u, u_old, x_mesh, time, dt, nu,
                                             beta_fun, theta,
                                             TOL=GMRES_TOL, 
                                             GMRES_RESTART=GMRES_RESTART, 
                                             MAX_ITER=GMRES_MAX_ITER)
             return u, err, iteration + 1
 
-        # as long as continue_newton() returns True, execute update_newton()
+        # as long as continue_Newton() returns True, execute update_Newton()
         # both functions MUST takes in input the same variables
         # (here, u, error and iteration number)
         # equivalent to:
         #   state = (u, tol + 1, 0)
-        #   while continue_newton(state):
-        #       state = update_newton(state)
+        #   while continue_Newton(state):
+        #       state = update_Newton(state)
         # FIXME: potrebbe essere necessario specificare 
         # jnp.asarray(tol + 1.0, dtype=u.dtype) e jnp.int32(0)
         # per assicurare stessa array shape e dtype
-        u, err, iteration = jax.lax.while_loop(continue_newton,
-                                               update_newton,
+        u, err, iteration = jax.lax.while_loop(continue_Newton,
+                                               update_Newton,
                                                (u, tol+1, 0)
                                                )
         # return:
@@ -471,9 +539,9 @@ def solve_Burgers(sol, x_mesh, t_mesh, nu, tol=1e-5, k_max=5000, beta=None, WRIT
     # compiled function
     jax.lax.cond(jnp.any(failed), 
                  # jax.debug.print() replaces print() in JIT-compiled functions
-                 lambda _: jax.debug.print(
-                         'WARNING: {N} time steps did not converge',
-                         N=jnp.count_nonzero(failed)),
+                 lambda _: jax.debug.print(f'{Fore.YELLOW}{{N}} time steps did '
+                                           f'not converge {Style.RESET_ALL}',
+                                           N=jnp.count_nonzero(failed)),
                  lambda _: None,
                  operand=None
                  )

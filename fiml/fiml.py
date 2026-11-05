@@ -6,7 +6,6 @@ Core FIML utilities.
 
 from os import process_cpu_count
 import matplotlib.pyplot as plt
-from scipy.interpolate import BSpline
 import jax
 # use float64, rather than float32
 jax.config.update('jax_enable_x64', True)
@@ -16,6 +15,9 @@ import jax.random as jrn
 import fiml.parallel as parallel
 import fiml.auxiliaries as aux
 from prettytable import PrettyTable
+import scipy.optimize as sciopt
+import optax
+import numpy as np
 
 
 def prior_sampling(theta_prior, var_prior, N_samples, key):
@@ -256,3 +258,166 @@ def launch_sampling(theta_samples, run_solver_case, solver_fun, N_x, N_t, N_samp
     run_type = 'Parallel' if RUN_PARALLEL else 'Sequential'
     print(f'{run_type} execution finished')
     return solution, max_residual, success
+
+
+def minimise_cost_function(cost_and_jacobian, x0, method='amsgrad',
+                           learn_rate=1e-2, max_iter=500, tol=1e-5,
+                           max_backtrack=8, print_every=20):
+    
+    x0 = jnp.asarray(x0, dtype=jnp.float64)
+    match method.lower():
+        case 'adam':
+            optimiser = optax.adam(learn_rate)
+        case 'amsgrad':
+            optimiser = optax.amsgrad(learn_rate)
+        case _:
+            raise ValueError(f"Unknown adaptive optimiser '{method}'")
+
+    # 3 checks on the solution:
+    #   - Burgers solver converged
+    #   - objective function is finite
+    #   - gradient of objective function is finite
+    def _is_valid_sol(cost, grad, forward_ok):
+        okay_sol = forward_ok & jnp.isfinite(cost) & jnp.all(jnp.isfinite(grad))
+        return okay_sol
+
+    @jax.jit
+    def run_optimiser(theta_0):
+        # initialise optimiser internal state with estimates for the 1st and 
+        # 2nd moments
+        int_state = optimiser.init(theta_0)
+        cost_0, grad_0, success_0 = cost_and_jacobian(theta_0)
+        valid_sol_0 = _is_valid_sol(cost_0, grad_0, success_0)
+        history = {'cost': jnp.full((max_iter+1,), jnp.nan),
+                   'grad_norm': jnp.full((max_iter+1,), jnp.nan),
+                   'theta': jnp.full((max_iter+1, x0.size), jnp.nan),
+                   'URF': jnp.full((max_iter+1,), jnp.nan),
+                   'N_fun_eval': jnp.full((max_iter+1,), jnp.nan)
+                   }
+        state_0 = (theta_0, int_state, cost_0, grad_0, 0, 1, valid_sol_0, False, history)
+
+        history['cost'] = history['cost'].at[0].set(cost_0)
+        history['grad_norm'] = history['grad_norm'].at[0].set(jnp.linalg.norm(grad_0))
+        history['theta'] = history['theta'].at[0].set(theta_0)
+        # no under-relaxation at the beginning
+        history['URF'] = history['URF'].at[0].set(1)
+        history['N_fun_eval'] = history['N_fun_eval'].at[0].set(1)
+        
+        # stopping condition: ||grad(J)|| > tol 
+        # (exact solution: grad(J) = 0)
+        def continue_optimisation(state):
+            _, _, _, grad, N_it, _, valid, _, _ = state
+            keep_going = valid & (N_it < max_iter) & (jnp.linalg.norm(grad) > tol)
+            return keep_going
+
+        def optimisation_step(state):
+            theta, opt_state, cost, grad, N_it, N_fun_eval, valid, failed, history = state
+            updates, opt_state_trial = optimiser.update(grad, opt_state, theta)
+            # N_attempts, accepted, theta, J, grad(J)
+            trial_state = (0, False, theta, cost, grad)
+
+            def continue_backtracking(trial):
+                N_attempts, accepted, _, _, _ = trial
+                keep_going = (~accepted) & (N_attempts <= max_backtrack)
+                return keep_going
+
+            def backtracking_step(trial):
+                N_attempts, _, theta_valid, cost_valid, grad_valid = trial
+                # halve URF each time: starts with 0.5^0 = 1 (full update)
+                # => if doesn't work, N_attempts is increased to 1 => use 0.5^1 
+                URF = 0.5**N_attempts
+                # theta_k+1 = theta_k + URF*delta_k
+                theta_trial = optax.apply_updates(theta, URF * updates)
+                cost_trial, grad_trial, success_trial = cost_and_jacobian(theta_trial)
+                valid_sol = _is_valid_sol(cost_trial, grad_trial, success_trial)
+
+                # where the updated solution is valid, replace the old solution;
+                # keep the old solution otherwise
+                new_state = (N_attempts+1, valid_sol, 
+                             jnp.where(valid_sol, theta_trial, theta_valid),
+                             jnp.where(valid_sol, cost_trial, cost_valid),
+                             jnp.where(valid_sol, grad_trial, grad_valid)
+                             )
+                return new_state
+
+            # state = trial_state
+            # while continue_backtracking(state):
+            #   state = backtracking_step()
+            N_attempts, okay_sol, theta_new, cost_new, grad_new = (
+                                    jax.lax.while_loop(continue_backtracking,
+                                                       backtracking_step, 
+                                                       trial_state)
+                                    )
+            # update optimiser internal state
+            # (jax.tree.map rather than jax.map because Optax's internal state
+            # is a PyTree object)
+            opt_state_new = jax.tree.map(lambda old, new: jnp.where(okay_sol, new, old),
+                                         opt_state, opt_state_trial)
+            N_it = N_it + okay_sol.astype(jnp.int32)
+            N_fun_eval = N_fun_eval + N_attempts
+            
+            def update_history(history):
+                return {
+                    'cost': history['cost'].at[N_it].set(cost_new),
+                    'grad_norm': history['grad_norm'].at[N_it].set(jnp.linalg.norm(grad_new)),
+                    'theta': history['theta'].at[N_it].set(theta_new),
+                    'URF': history['URF'].at[N_it].set(0.5**(N_attempts-1)),
+                    'N_fun_eval': history['N_fun_eval'].at[N_it].set(N_fun_eval)
+                }
+            history = jax.lax.cond(okay_sol, update_history, lambda h: h, history)
+
+            if print_every:
+                # always print at 1st step
+                jax.lax.cond(okay_sol & ((N_it == 1) | (N_it % print_every == 0)),
+                             # to sue method.upper(), you need an f-string, but
+                             # jex.debug.print() format the string at runtime
+                             # (because n, k, etc. change during execution)
+                             # => surround 'k' with double {{...}}
+                             lambda _: jax.debug.print(f'{method.upper()} iteration {{k:5d}}: '
+                                                       'J = {cost:.8e}, '
+                                                       '||grad(J)|| = {norm:.5e}, '
+                                                       'backtracking steps = {n}',
+                                                       k=N_it, cost=cost_new,
+                                                       norm=jnp.linalg.norm(grad_new), 
+                                                       # 1 attempt => URF = 1 => no backtracking
+                                                       n=N_attempts-1),
+                             lambda _: None, operand=None)
+
+            return (theta_new, opt_state_new, cost_new, grad_new, N_it,
+                    N_fun_eval, valid & okay_sol, failed | ~okay_sol, history)
+
+        theta, _, cost, grad, N_it, N_fun_eval, valid, failed, history = (
+                                    jax.lax.while_loop(continue_optimisation,
+                                                       optimisation_step, 
+                                                       state_0)
+                                    )
+        return theta, cost, grad, N_it, N_fun_eval, valid, failed, valid_sol_0, history
+
+    opt_sol = run_optimiser(x0)
+    theta, cost, grad, N_it, N_fun_eval, valid, failed, valid_sol_0, history = opt_sol
+    # remove unused entries (array has been preallocated to the max number of
+    # iterations)
+    history = {key: values[0:N_it+1] for key, values in history.items()}
+
+    # repack output into a SciPy's OptimizeResult object, to make the code
+    # compatible with SciPy's BFSG optimiser
+    converged = valid & (jnp.linalg.norm(grad) <= tol)
+    if converged:
+        status = 0
+        message = 'Gradient norm norm below tol'
+    elif not valid_sol_0:
+        status = 3
+        message = 'Invalid initial objective, gradient, or forward solve'
+    elif failed:
+        status = 2
+        message = 'No valid Adam/AMSGrad step after backtracking'
+    else:
+        status = 1
+        message = 'Maximum number of iterations reached'
+
+    result = sciopt.OptimizeResult(x=np.asarray(theta), fun=float(cost),
+                                   jac=np.asarray(grad), nit=int(N_it),
+                                   nfev=int(N_fun_eval), njev=int(N_fun_eval),
+                                   success=bool(converged), status=status, 
+                                   message=message, history=history)
+    return result
