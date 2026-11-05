@@ -27,7 +27,7 @@ DEFAULT_INPUT = 'setup_FIML/BCDirichlet_steady_nu_u.yaml'
 DEFAULT_OUTPUT = 'setup_FIML/Burgers_post.yaml'
 
 
-def cli(defaul_input=None, default_output=None):
+def cli(default_input=None, default_output=None):
     if len(sys.argv) > 1:
         ANALYSIS = False
         POST_PROC = False
@@ -58,13 +58,15 @@ def cli(defaul_input=None, default_output=None):
                           '\t --help: print this help')
                     quit()
                 case _:
-                    raise ValueError('Unknown CLI input')
+                    raise ValueError(f"Unknown CLI input '{sys.argv[j]}'")
     else:
-        # interactive execution from Spyder
-        ANALYSIS = True
-        POST_PROC = False
+        if default_input is not None:
+            ANALYSIS = True
+        if default_output is not None:
+            POST_PROC = True
+            
         if ANALYSIS:
-            input_file = Path(defaul_input)
+            input_file = Path(default_input)
             output_file = None
         if POST_PROC:
             input_file = None
@@ -72,14 +74,24 @@ def cli(defaul_input=None, default_output=None):
     return ANALYSIS, POST_PROC, input_file, output_file
 
 
-def main():
+def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None,
+         output_data=None):
     #%% READ USER INPUT
-    ANALYSIS, POST_PROC, input_file, output_file = cli(
-                                            defaul_input=DEFAULT_INPUT, 
-                                            default_output=DEFAULT_OUTPUT)
+    if (input_data, output_data) == (None, None):
+        ANALYSIS, POST_PROC, input_file, output_file = cli(default_input=INPUT_FILE,
+                                                           default_output=OUTPUT_FILE)
+    elif input_data is not None:
+        ANALYSIS = True
+        POST_PROC = False
+        input_file = None
+    elif output_data is not None:
+        POST_PROC = True
+        ANALYSIS = False
+        output_file = None
     if ANALYSIS:
-        with open(input_file, 'r') as file:
-            input_data = yaml.safe_load(file)
+        if input_file is not None and input_data is None:
+            with open(input_file, 'r') as file:
+                input_data = yaml.safe_load(file)
         sol_file = Path(input_data['files']['solution'])
         probes_file = Path(input_data['files']['data'])
         out_dir = Path(input_data['files']['output_dir'])
@@ -102,8 +114,9 @@ def main():
         optimiser_opts = input_data['optimisation']
     
     if POST_PROC:
-        with open(output_file, 'r') as file:
-            output_data = yaml.safe_load(file)
+        if output_file is not None and output_data is None:
+            with open(output_file, 'r') as file:
+                output_data = yaml.safe_load(file)
         FIML_file = Path(output_data['FIML_file'])
         probes_file = Path(output_data['data_file'])
         
@@ -162,4 +175,5 @@ def main():
                        input_file=input_file)
 
 if __name__ == '__main__':
-    main()
+    main(INPUT_FILE=DEFAULT_INPUT)
+    #main(INPUT_FILE=DEFAULT_OUTPUT)
