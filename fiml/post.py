@@ -345,7 +345,7 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
             #   beta = e^z
             # shape: (Nx, Nt)
             z_exact = jnp.log(beta_exact)
-        case 'BxBt' | 'RBF_Gauss_x' | 'RBF_Gauss_u' | 'RBF_Gauss_x_poly':
+        case 'BxBt' | 'RBF_Gauss_x' | 'RBF_Gauss_u' | 'RBF_Gauss_x_poly' | 'RBF_Gauss_uu':
             # shape: (Nx, Nt)
             z_exact = beta_exact - opts['beta_ref']
         case _:
@@ -386,11 +386,17 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
             theta = jnp.linalg.lstsq(beta_params['Phi'], z_exact)[0]
             # theta: (N_theta, 1) -> (N_theta, )
             theta = jnp.ravel(theta)
-        case 'RBF_Gauss_u' | 'RBF_Gauss_u_softplus':
+        case 'RBF_Gauss_u' | 'RBF_Gauss_u_softplus' | 'RBF_Gauss_uu':
             # shape: (Nx, N_RBF, N_t)
             N_RBF = beta_params['N_params']
-            Phi = betamod._RBF_Gauss_u_Phi(sol_exact['x'], beta_params['x_c'], 
-                                           sol_exact['solution'], opts['shape_factor'])
+            if opts['model'] == 'RBF_Gauss_uu':
+                Phi = betamod._RBF_Gauss_uu_Phi(sol_exact['solution'], 
+                                                beta_params['u_c'], 
+                                                opts['shape_factor'])
+            else:
+                Phi = betamod._RBF_Gauss_u_Phi(sol_exact['x'], beta_params['x_c'], 
+                                               sol_exact['solution'], 
+                                               opts['shape_factor'])
             # at each time instant, the N_RBF equations holds:
             #   Phi[:,:,k] * theta = z[:,k]
             # since theta is always the same, it can be rewritten by stacking
