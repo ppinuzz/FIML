@@ -13,8 +13,9 @@ jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
 import cloudpickle
 import yaml
-import os
+from copy import deepcopy
 import h5py
+import argparse
 
 from burgers import solve_Burgers
 FIML_pkg = Path(r'C:\Andrea\Dottorato\FIML')
@@ -27,71 +28,52 @@ DEFAULT_INPUT = 'setup_FIML/BCDirichlet_steady_nu_u.yaml'
 DEFAULT_OUTPUT = 'setup_FIML/Burgers_post.yaml'
 
 
-def cli(default_input=None, default_output=None):
-    if len(sys.argv) > 1:
-        ANALYSIS = False
-        POST_PROC = False
-        # 0: filename
-        # 1: flag
-        # 2: flag argument
-        j = 1
-        while j < len(sys.argv):
-            match sys.argv[j]:
-                case '--input' | '-i':
-                    # current argument is the flag => next is the filename
-                    input_file = Path(os.getcwd()) / sys.argv[j+1]
-                    # skip filename, so that next loop will read the next flag
-                    j += 2
-                    ANALYSIS = True
-                    output_file = None
-                case '--post' | '-p':
-                    # current argument is the flag => next is the filename
-                    output_file = Path(os.getcwd()) / sys.argv[j+1]
-                    # skip filename, so that next loop will read the next flag
-                    j += 2
-                    POST_PROC = True
-                    input_file = None
-                case '--help' | '-h':
-                    print('Possible flags: \n'
-                          '\t --input, -i: prescribe YAML input file \n'
-                          '\t --post, -p: prescribe YAML postprocessing file \n'
-                          '\t --help: print this help')
-                    quit()
-                case _:
-                    raise ValueError(f"Unknown CLI input '{sys.argv[j]}'")
+def cli(argv=None):
+    parser = argparse.ArgumentParser(
+                prog='FIML',
+                description='Run FIML analysis or postprocessing',
+                # force the user to enter the exact long option's name
+                # (otherwise, --a, --arg, --arg-long-name will be equivalent)
+                allow_abbrev=False)
+
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument('-i', '--input')
+    mode.add_argument('-p', '--post')
+    
+    # parse the arguments passed to the script
+    args = parser.parse_args(argv)
+
+    if args.post is not None:
+        return main(OUTPUT_FILE=args.post)
     else:
-        if default_input is not None:
-            ANALYSIS = True
-        if default_output is not None:
-            POST_PROC = True
-            
-        if ANALYSIS:
-            input_file = Path(default_input)
-            output_file = None
-        if POST_PROC:
-            input_file = None
-            output_file = Path(default_output)
-    return ANALYSIS, POST_PROC, input_file, output_file
+        if args.input is not None:
+            file_input = args.input
+        else:
+            file_input = DEFAULT_INPUT
+        return main(INPUT_FILE=file_input)    
 
 
-def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None,
-         output_data=None):
-    #%% READ USER INPUT
-    if (input_data, output_data) == (None, None):
-        ANALYSIS, POST_PROC, input_file, output_file = cli(default_input=INPUT_FILE,
-                                                           default_output=OUTPUT_FILE)
-    elif input_data is not None:
-        ANALYSIS = True
-        POST_PROC = False
-        input_file = None
-    elif output_data is not None:
-        POST_PROC = True
-        ANALYSIS = False
-        output_file = None
+def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
+    
+    # INPUT VALIDATION
+    if INPUT_FILE is not None and input_data is not None:
+        raise ValueError('Provide either INPUT_FILE or input_data, not both!')
+    if OUTPUT_FILE is not None and output_data is not None:
+        raise ValueError('Provide either OUTPUT_FILE or output_data, not both!')
+    ANALYSIS = INPUT_FILE is not None or input_data is not None
+    POST_PROC = OUTPUT_FILE is not None or output_data is not None
+    if ANALYSIS == POST_PROC:
+        raise ValueError('Provide exactly one analysis input OR one postprocessing input')
+    
+    
     if ANALYSIS:
-        if input_file is not None and input_data is None:
-            with open(input_file, 'r') as file:
+        if input_data is None:
+            with open(INPUT_FILE, 'r') as file:
                 input_data = yaml.safe_load(file)
+        # safety: use a deep copy of the dictionary to avoid modifying data
+        # of the caller script
+        input_data= deepcopy(input_data)
+        
         sol_file = Path(input_data['files']['solution'])
         probes_file = Path(input_data['files']['data'])
         out_dir = Path(input_data['files']['output_dir'])
@@ -112,17 +94,31 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None,
         STEADY = input_data['steady']
         hessian_model = input_data['hessian']
         optimiser_opts = input_data['optimisation']
+        
+        # for reproducibility: write a copy of the input data
+        out_dir.mkdir(parents=True, exist_ok=True)
+        run_input_file = out_dir / 'input_used.yaml'
+        with open(run_input_file, 'w') as file:
+            yaml.safe_dump(input_data, file)
     
     if POST_PROC:
-        if output_file is not None and output_data is None:
-            with open(output_file, 'r') as file:
+        if output_data is None:
+            with open(OUTPUT_FILE, 'r') as file:
                 output_data = yaml.safe_load(file)
+        
+        output_data = deepcopy(output_data)
+                
         FIML_file = Path(output_data['FIML_file'])
         probes_file = Path(output_data['data_file'])
-        
         beta_exact_file = Path(output_data['exact_solution_file'])
-        
-        post_dir = Path(output_data['output_dir'])
+        out_dir = Path(output_data['output_dir'])
+
+
+        # for reproducibility: write a copy of the input data
+        out_dir.mkdir(parents=True, exist_ok=True)
+        run_output_file = out_dir / 'post_used.yaml'
+        with open(run_output_file, 'w') as file:
+            yaml.safe_dump(output_data, file)
 
 
     #%% REPACK DATA
@@ -165,15 +161,15 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None,
     
     #%% LAUNCH CODE
     if POST_PROC:
-        fiml.main.postprocessing(FIML_file, probes_file, post_dir, beta_exact=beta_exact,
+        fiml.main.postprocessing(FIML_file, probes_file, out_dir, beta_exact=beta_exact,
                                  sol_exact=sol_exact)
     if ANALYSIS:
         fiml.main.analysis(exp_data, mesh, BC, nu, out_dir, beta_opts,
                        sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,
                        N_WORKERS, RUN_PARALLEL, solve_Burgers, optimiser_opts, CHECK, VIDEO,
                        beta_exact, BATCH, IDX_TIME_PLOT=-1, STEADY=STEADY, hessian=hessian_model,
-                       input_file=input_file)
+                       input_file=run_input_file)
 
 if __name__ == '__main__':
-    main(INPUT_FILE=DEFAULT_INPUT)
-    #main(INPUT_FILE=DEFAULT_OUTPUT)
+    #cli(['--post', str(DEFAULT_OUTPUT)])
+    cli()
