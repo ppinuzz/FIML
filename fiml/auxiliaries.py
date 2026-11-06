@@ -18,6 +18,7 @@ from colorama import Fore, Style, just_fix_windows_console
 # (does nothing on other OS's)
 just_fix_windows_console()
 from prettytable import PrettyTable
+import cloudpickle
 
 
 def warning(message):
@@ -284,6 +285,12 @@ def save_dict_to_hdf5(data, group_obj):
         if isinstance(data[key], dict):
             subgroup = group_obj.create_group(key)
             save_dict_to_hdf5(data[key], subgroup)
+        elif callable(data[key]):
+            # transform the function into an array by pickling it
+            group_obj.create_dataset(name=key, 
+                                     data=jnp.frombuffer(cloudpickle.dumps(data[key]),
+                                                         dtype=jnp.uint8)
+                                     )
         elif data[key] is None:
             # "float" empty type
             group_obj.create_dataset(key, data=h5py.Empty('f'))
