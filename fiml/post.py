@@ -456,6 +456,8 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
         plt.show(block=False)
         if fig_file is not None:
             aux.save_fig(fig, fig_file.name, fig_file.parent)
+    
+    return theta
 
 
 def plot_convergence_history(opt_obj, fig_file=None):
@@ -479,3 +481,78 @@ def plot_convergence_history(opt_obj, fig_file=None):
     plt.show(block=False)
     if fig_file is not None:
         aux.save_fig(fig_cost, f'{fig_file.name}_cost', fig_file.parent)
+
+
+def check_exact_beta_PDE(theta_ex, beta_fun, run_solver, sol_exact, x_mesh, t_mesh,
+                         PLOT=True, fig_file=None, t_plot=None):
+    # solve the problem using the "exact" theta obtained by fitting the exact
+    # beta using the given parametrisation => if the fitting is good,
+    # beta(theta_ex) = beta_ex => the PDE should be the original exact PDE,
+    # therefore the solution should be the exact one
+    solution, max_residual, success = run_solver(theta_ex, beta_fun, x_mesh, t_mesh)
+    
+    if solution.shape != sol_exact['solution'].shape:
+        exact_sol_resamp = aux.sample_solution(sol_exact['solution'], 
+                                               x_mesh=sol_exact['x'], t_mesh=sol_exact['t'], 
+                                               x_probes=x_mesh, t_probes=t_mesh)
+    else:
+        exact_sol_resamp = sol_exact['solution']
+    delta = solution - exact_sol_resamp
+    avg_delta = jnp.mean(jnp.abs(delta))
+    rel_err = delta / exact_sol_resamp
+    norm_err = jnp.linalg.norm(delta) / jnp.linalg.norm(exact_sol_resamp)
+    aux.check_msg('Difference between PDE solution (at theta = theta_fit from '
+                  'exact beta) and experimental data:'
+                  f'\n\tMax absolute difference                     : {delta.max():.5e}'
+                  f'\n\tMin absolute difference                     : {delta.min():.5e}'
+                  f'\n\tAverage absolute difference (at all times)  : {avg_delta:.5e}'
+                  f'\n\tL2-norm relative difference                 : {norm_err:.5e}')
+    
+    if PLOT:
+        x = sol_exact['x']
+        t = sol_exact['t']
+        
+        fig_delta, ax = plt.subplots()
+        # specify the physical extent of the domain and where is the origin of
+        # the y-axis
+        # aspect='auto' stretches the pixels, making them non-square => not
+        # relevant here, since the 2 dimensions are not compatible (time-space)
+        im = ax.imshow(jnp.abs(delta), cmap='hot', extent=[t[0], t[-1], x[0], x[-1]],
+                       origin='upper', aspect='auto')
+        ax.set_xlabel('$t$ [-]')
+        ax.set_ylabel('$x$ [-]')
+        ax.set_title(r'Solution at $\theta = \theta_\mathrm{fit}$ vs experiment$')
+        col_bar = fig_delta.colorbar(im, ax=ax)
+        col_bar.set_label(r'$|u_\mathrm{ex} - u(\theta_\mathrm{fit})|$ [-]')
+        if fig_file is not None:
+            # plt.imshow() doesn't return a Figure, but an Axes object
+            aux.save_fig(fig_delta.figure, f'{fig_file.name}_delta', fig_file.parent)
+        plt.show(block=False)
+        
+        if t_plot is None:
+            idx_plot_t = -1
+            time_str = ''
+        else:
+            raise NotImplementedError("Still haven't implemented t_plot != None case")
+        
+        fig_compare = plt.figure()
+        plt.plot(x, sol_exact['solution'][idx_plot_t,:], label='Exact')
+        plt.plot(x_mesh, solution[idx_plot_t,:], label=r'u(x; $\theta = \theta_\mathrm{fit})$')
+        plt.xlabel('$x$ [-]')
+        plt.ylabel('$u$ [-]')
+        plt.title(r'Solution at $\theta = \theta_\mathrm{fit}$ vs experiment')
+        plt.legend()
+        plt.autoscale(enable=True, axis='x', tight=True)
+        if fig_file is not None:
+            aux.save_fig(fig_compare, f'{fig_file.name}_uSolution', fig_file.parent)
+        plt.show(block=False)
+        
+        fig_error = plt.figure()
+        plt.plot(x_mesh, 100*rel_err[idx_plot_t,:])
+        plt.xlabel('$x$ [-]')
+        plt.ylabel(r'$|u_\mathrm{ex} - u(\theta_\mathrm{fit})|/u_\mathrm{ex}$ [\%]')
+        plt.title(r'Relative error')
+        plt.autoscale(enable=True, axis='x', tight=True)
+        if fig_file is not None:
+            aux.save_fig(fig_error, f'{fig_file.name}_error', fig_file.parent)
+        plt.show(block=False)

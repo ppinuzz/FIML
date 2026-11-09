@@ -151,6 +151,11 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
         # numerical discretisation of u0
         u_IC = jnp.asarray(u_IC_fun(x_mesh))
     
+    print(f'Saving boundary conditions to \n\t{out_filename.resolve()}...')
+    hdf5_group = out_file.create_group('boundary_conditions')
+    aux.save_dict_to_hdf5(BC, hdf5_group)
+    out_file.flush()
+    
     # EXPERIMENTAL DATA
     x_exp = jnp.asarray(exp_data['x'])
     t_exp = jnp.asarray(exp_data['t'])
@@ -455,16 +460,16 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     print(f'HDF5 groups: {list(out_file.keys())}')
     out_file.close()
     
-    
     # all figures are created with block=False to avoid blocking the execution
     # => block the last one, so that the user can inspect them before closing 
     # them and allowing the function to return
     if PLOT:
-        aux.warning("Close all figures to terminate the execution or generate an exit.fiml file")
+        aux.warning('Close all figures to terminate the execution or generate an exit.fiml file')
         
         exit_file = Path('exit.fiml')
         def check_exit_file():
             if exit_file.is_file():
+                aux.warning('exit.fiml file detected, closinf figures and terminating execution...')
                 plt.close('all')
                 return False
             return True
@@ -486,7 +491,7 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
 
 #%% POSTPROCESSING
 
-def postprocessing(sol_file, exp_file, out_dir, beta_exact=None, sol_exact=None):
+def postprocessing(sol_file, exp_file, out_dir, solver_fun, nu_fun, beta_exact=None, sol_exact=None):
     sol_file = Path(sol_file)
     print(f'Reading FIML solution from \n\t{sol_file.resolve()}')
     # https://stackoverflow.com/a/41586571/17220538
@@ -499,11 +504,18 @@ def postprocessing(sol_file, exp_file, out_dir, beta_exact=None, sol_exact=None)
         MAP_data = aux.load_dataset(file, 'MAP')
         mesh = aux.load_dataset(file, 'mesh')
         input_data = aux.load_dataset(file, 'input_data')
+        BC = aux.load_dataset(file, 'boundary_conditions')
     
     exp_file = Path(exp_file)
     print(f'Reading experimental data from \n\t{exp_file.resolve()}')
     with h5py.File(exp_file, 'r') as file:
         exp_data = aux.load_dataset(file)
+    
+    if mesh['t'].size == 1:
+        aux.warning('Only one time instant in the time mesh, assuming steady flow...')
+        STEADY = True
+    else:
+        STEADY = False
     
     # check where experimental data lie within the +/- 2 sigma band around the
     # sample mean value, for both the prior and the posterior
@@ -537,8 +549,23 @@ def postprocessing(sol_file, exp_file, out_dir, beta_exact=None, sol_exact=None)
     # check if the parametrisation is able to reproduce the exact beta
     if beta_exact is not None and sol_exact is not None:
         beta_opts = betamod.read_beta_options(input_data['beta'])
-        post.check_parametrisation_fitness(sol_exact, beta_exact['beta'], beta_opts,
-                                           fig_file=out_dir/'checkBetaParam')
+        theta_ex = post.check_parametrisation_fitness(sol_exact, beta_exact['beta'], beta_opts,
+                                                      fig_file=out_dir/'checkBetaParam')
+        
+        # calculate function beta = beta(theta, ...)
+        beta_fun, beta_params = betamod.parametrise_beta(beta_opts, mesh['x'], mesh['t'], STEADY)
+        # ignore 1st output (i.e. the run ID)        
+        run_solver_fun = lambda theta_ex, beta_fun, x_mesh, t_mesh: run_solver_case(
+                                    None, theta_ex, solver_fun, beta_fun, nu_fun,
+                                    x_mesh, t_mesh, u_IC=BC['u_IC'], u0=BC['u0'], uL=BC['uL'],
+                                    STEADY=STEADY, out_dir=None)[1:]
+        # solve the PDE with the "exact" value of theta => you should get the
+        # exact solution
+        post.check_exact_beta_PDE(theta_ex, beta_fun, run_solver_fun, sol_exact,
+                                  mesh['x'], mesh['t'])
+    
+    
+    
     
     post.compare_prior_posterior(prior_valid, posterior_valid, **check_sigma_opts, 
                                  fig_file=out_dir/'priorVSposterior')
