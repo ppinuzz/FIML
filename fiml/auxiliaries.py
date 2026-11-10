@@ -19,6 +19,9 @@ from colorama import Fore, Style, just_fix_windows_console
 just_fix_windows_console()
 from prettytable import PrettyTable
 import cloudpickle
+import yaml
+
+import fiml.objects as objects
 
 
 def warning(message):
@@ -378,3 +381,46 @@ def print_theta(theta_MAP, theta_prior, STEADY, t_mesh=None, t=None):
     for i in range(theta_MAP.shape[0]):
         theta_report.add_row([i+1, f'{theta_prior[i,idx_time]:+.5e}', f'{theta_MAP[i,idx_time]:+.5e}'])
     check_msg(theta_report.get_string())
+
+
+def read_input_data(input_obj, num_solution_obj, exp_data_obj, solver):
+    input_data = _read_file_or_obj(input_obj, msg='input file')
+    
+    print(f'Reading data file \n\t{exp_data_obj.resolve()}')
+    with h5py.File(exp_data_obj, 'r') as file:
+        exp_data = {'x': jnp.asarray(file['probes']['x']),
+                    't': jnp.asarray(file['probes']['t']),
+                    'solution': jnp.asarray(file['exact']['solution'])
+                    }
+    with h5py.File(num_solution_obj, 'r') as file:
+        BC = {'u0': jnp.asarray(file['settings']['u0']), 
+              'uL': jnp.asarray(file['settings']['uL']), 
+              # HDF5 dataset object -> NumPy array -> lambda function
+              'u_IC': cloudpickle.loads(jnp.asarray(file['settings']['u_IC']))
+              }
+        nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
+        if 'beta' in file.keys():
+            beta_exact = {'x': jnp.asarray(file['mesh']['x']),
+                          't': jnp.asarray(file['mesh']['t']),
+                          'beta': jnp.asarray(file['beta']['beta'])
+                          }
+        else:
+            beta_exact = None
+    problem = objects.Problem(mesh=generate_mesh(input_data), BC=BC, nu=nu, 
+                              solver_fun=solver)
+    
+    return problem, beta_exact, exp_data
+
+
+def _read_file_or_obj(input_obj, msg=''):
+    if isinstance(input_obj, Path) or isinstance(input_obj, str):
+        input_obj = Path(input_obj)
+        print(f'Reading {msg} \n\t{input_obj.resolve()}')
+        with open(input_obj, 'r') as file:
+            input_data = yaml.safe_load(file)
+    elif isinstance(input_obj, dict):
+        input_data = input_obj.copy()
+    else:
+        raise ValueError('Unknown input object type: neither Path, nor str')
+    return input_data
+    

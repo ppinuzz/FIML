@@ -22,6 +22,8 @@ import fiml.auxiliaries as aux
 import fiml.post as post
 import fiml.beta as betamod
 
+from fiml.objects import *
+
 
 def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh, 
                     u_IC, u0, uL, STEADY, out_dir, TOL=1e-5, PRINT_ERR_MSG=True):
@@ -79,9 +81,9 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
     return run_id, solution, max_res, success
 
 
-def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior, 
+def analysis(exp_data, problem_obj, out_dir, beta_opts, sigma2_prior, 
              N_sampling_prior, N_sampling_post, SEED, sigma2_obs, N_WORKERS, RUN_PARALLEL,
-             solver_fun, optimiser_opts, CHECK=False, VIDEO=False, beta_exact=None, BATCH=False,
+             optimiser_opts, CHECK=False, VIDEO=False, beta_exact=None, BATCH=False,
              IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True, STEADY=True, hessian='full',
              input_file=None):
     
@@ -102,11 +104,13 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     comprex_opts = {'shuffle': True, 'compression': 'gzip', 'compression_opts': 9}
     
     # MESH DATA
-    x_mesh = jnp.asarray(mesh['x'])
-    t_mesh = jnp.asarray(mesh['t'])
+    solver_fun = problem_obj.solver_fun
+    nu = problem_obj.nu
+    x_mesh = problem_obj.x_mesh
+    t_mesh = problem_obj.t_mesh
     N_x = x_mesh.size
     N_t = t_mesh.size
-    L = x_mesh[-1] - x_mesh[0]
+    #L = x_mesh[-1] - x_mesh[0]
     t0 = t_mesh[0]
     if N_t == 1:
         aux.warning('Steady problem: initial conditions, time length and dt will be ignored')
@@ -142,14 +146,11 @@ def analysis(exp_data, mesh, BC, nu, out_dir, beta_opts, sigma2_prior,
     
     
     # BOUNDARY CONDITIONS
-    u0 = BC['u0']
-    uL = BC['uL']
-    u_IC_fun = BC['u_IC']                   # function u0(x)
-    if STEADY:
-        u_IC = None
-    else:
-        # numerical discretisation of u0
-        u_IC = jnp.asarray(u_IC_fun(x_mesh))
+    BC = problem_obj.BC
+    u0 = problem_obj.u0
+    uL = problem_obj.uL
+    #u_IC_fun = problem_obj.u_IC_fun     # function u0(x)
+    u_IC = problem_obj.u_IC
     
     print(f'Saving boundary conditions to \n\t{out_filename.resolve()}...')
     hdf5_group = out_file.create_group('boundary_conditions')

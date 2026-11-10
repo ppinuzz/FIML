@@ -38,6 +38,7 @@ from . import parallel
 from . import main
 from . import post
 from . import beta
+from . import objects
 
 
 __version__ = '0.0.1'

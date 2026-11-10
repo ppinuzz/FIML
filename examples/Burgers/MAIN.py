@@ -124,26 +124,10 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
     #%% REPACK DATA
     
     if ANALYSIS:
-        with h5py.File(probes_file, 'r') as file:
-            exp_data = {'x': jnp.asarray(file['probes']['x']),
-                        't': jnp.asarray(file['probes']['t']),
-                        'solution': jnp.asarray(file['exact']['solution'])
-                        }
-        with h5py.File(sol_file, 'r') as file:
-            BC = {'u0': jnp.asarray(file['settings']['u0']), 
-                  'uL': jnp.asarray(file['settings']['uL']), 
-                  # HDF5 dataset object -> NumPy array -> lambda function
-                  'u_IC': cloudpickle.loads(jnp.asarray(file['settings']['u_IC']))
-                  }
-            nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
-            if 'beta' in file.keys():
-                beta_exact = {'x': jnp.asarray(file['mesh']['x']),
-                              't': jnp.asarray(file['mesh']['t']),
-                              'beta': jnp.asarray(file['beta']['beta'])
-                              }
-            else:
-                beta_exact = None
-        mesh = fiml.auxiliaries.generate_mesh(input_data)
+        problem, beta_exact, exp_data = fiml.auxiliaries.read_input_data(
+                                            input_data, sol_file, probes_file, 
+                                            solve_Burgers)
+        
 
     if POST_PROC:
         with h5py.File(beta_exact_file, 'r') as file:
@@ -166,11 +150,11 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
         fiml.main.postprocessing(FIML_file, probes_file, out_dir, solve_Burgers, 
                                  nu, beta_exact=beta_exact, sol_exact=sol_exact)
     if ANALYSIS:
-        fiml.main.analysis(exp_data, mesh, BC, nu, out_dir, beta_opts,
-                       sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,
-                       N_WORKERS, RUN_PARALLEL, solve_Burgers, optimiser_opts, CHECK, VIDEO,
-                       beta_exact, BATCH, IDX_TIME_PLOT=-1, STEADY=STEADY, hessian=hessian_model,
-                       input_file=run_input_file)
+        fiml.main.analysis(exp_data, problem, out_dir, beta_opts,
+                           sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,
+                           N_WORKERS, RUN_PARALLEL, optimiser_opts, CHECK, VIDEO,
+                           beta_exact, BATCH, IDX_TIME_PLOT=-1, STEADY=STEADY, hessian=hessian_model,
+                           input_file=run_input_file)
 
 if __name__ == '__main__':
     #cli(['--post', str(DEFAULT_OUTPUT)])
