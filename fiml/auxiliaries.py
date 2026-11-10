@@ -193,38 +193,56 @@ def sample_solution(solution, x_mesh=None, t_mesh=None, x_probes=None, t_probes=
     return sol_sampled
 
 
-def save_sampling(hdf5_file, group_name, opts, theta, sol, res, success, beta,
-                  key_random=None):
-    # make all data at least 1D, otherwise you won't be able to apply the
-    # compression options
-    theta = jnp.atleast_1d(theta)
-    sol = jnp.atleast_1d(sol)
-    res = jnp.atleast_1d(res)
-    success = jnp.atleast_1d(success)
-    beta = jnp.atleast_1d(beta)
+def save_sampling(hdf5_file, group_name, opts, data_obj, save_failed_runs=False):
+    
+    FIELDS_SAVE = {'theta': ('Each column is one drow and theta contains the '
+                             f'{data_obj.theta.shape[0]} parameters required to '
+                             'describe fully the correction beta'), 
+                   'solution': ('The i-th row is the solution on all the 1D mesh '
+                                'for the i-th time instant'),
+                   'max_res': ('The i-th row contains the maximum residual for '
+                               'the i-th time instant'),
+                   'success': ('If False, the k-th simulation did not converge '
+                               'or crashed'), 
+                   'beta': ('Correction beta(x,y) with dimensione (Nx, Nt), '
+                            'transposed ordering w.r.t. solution variable'),
+                   'key_random': ('Key used to randomly draw the parameters '
+                                  'for the sampling')
+                   }
+    
+    print(f"Saving the following fields in HDF5 group '{group_name}': {FIELDS_SAVE.keys()}")
+    if save_failed_runs:
+        print('Saving failed runs (non-converged solution or Inf/NaN solution) '
+              'as well as filtered runs, with only converged solutions')
     
     hdf5_group = hdf5_file.create_group(group_name)
-    tmp_set = hdf5_group.create_dataset(name='theta', data=theta, **opts)
-    tmp_set.attrs['description'] = ('Each column is one drow and theta contains the '
-                                    f'{theta.shape[0]} parameters required to describe '
-                                    'fully the correction beta')
-    tmp_set = hdf5_group.create_dataset(name='solution', data=sol, **opts)
-    tmp_set.attrs['description'] = ('The i-th row is the solution on all the 1D mesh for the i-th '
-                                    'time instant')
-    tmp_set = hdf5_group.create_dataset(name='max_res', data=res, **opts)
-    tmp_set.attrs['description'] = ('The i-th row contains the maximum residual for the i-th time instant')
-    tmp_set = hdf5_group.create_dataset(name='success', data=success, **opts)
-    tmp_set.attrs['description'] = ('If False, the k-th simulation did not converge or crashed')
-    tmp_set = hdf5_group.create_dataset(name='beta', data=beta, **opts)
-    tmp_set.attrs['description'] = ('Correction beta(x,y) with dimensione (Nx, Nt), '
-                                    'transposed ordering w.r.t. solution variable')
-    if key_random is not None:
-        key_random = jnp.atleast_1d(key_random)
-        tmp_set = hdf5_group.create_dataset(name='key', data=key_random, **opts)
-        tmp_set.attrs['description'] = ('Key used to randomly draw the parameters for the sampling')
+    for field in FIELDS_SAVE:
+        # None as default value
+        data = getattr(data_obj, field, None)
+        if data is None:
+            warning(f"Property '{field}' not present in data object, skipping it...")
+            continue
+        # make data at least 1D, otherwise you won't be able to apply the
+        # compression options
+        data = jnp.atleast_1d(data)
+    
+        tmp_set = hdf5_group.create_dataset(name=field, data=data, **opts)
+        tmp_set.attrs['description'] = FIELDS_SAVE[field]
+        
+        if save_failed_runs:
+            data = getattr(data_obj, f'{field}_orig', None)
+            if data is None:
+                warning(f"Property '{field}_orig' not present in data object, skipping it...")
+                continue
+            tmp_set = hdf5_group.create_dataset(name=f'{field}_orig', data=data, **opts)
+            tmp_set.attrs['description'] = (f'Same as {FIELDS_SAVE[field]}, but '
+                                            'original data, including failed or '
+                                            'non-converged runs')
+
     # write to disk without closing the file
     print(f'Writing data to \n\t{Path(hdf5_file.filename).resolve()}')
     hdf5_file.flush()
+
 
 
 def _sample_sol_space(u, x_mesh, x_probes):
@@ -333,16 +351,15 @@ def generate_mesh(input_data):
             N_x = int(L / mesh_opts['dx']) + 1
             x_mesh = jnp.linspace(0, L, N_x)
         
-        if mesh_opts['dt'] is None:
-            if input_data['steady']:
-                print('No time step provided, reading exact solution files for mesh settings...')
-                t_mesh = jnp.asarray(file['mesh']['t'])
-            else:
-                warning('Steady simulation, time will be ignored and set to 0 arbitrarily...')
-                t_mesh = jnp.array([0])
+        if input_data['steady']:
+            warning('Steady simulation, time will be ignored and set to 0 arbitrarily...')
+            t_mesh = jnp.array([0.0])
+        elif mesh_opts['dt'] is None:
+            print('No time step provided, reading exact solution files for mesh settings...')
+            t_mesh = jnp.asarray(file['mesh']['t'])
         else:
             print(f'Calculating time step in domain [0, {T}] with time step '
-                  f"dx = {mesh_opts['dt']}...")
+                  f"dt = {mesh_opts['dt']}...")
             # N elements => N+1 nodes
             N_t = int(T / mesh_opts['dt']) + 1
             t_mesh = jnp.linspace(0, T, N_t)
@@ -388,10 +405,9 @@ def read_input_data(input_obj, num_solution_obj, exp_data_obj, solver):
     
     print(f'Reading data file \n\t{exp_data_obj.resolve()}')
     with h5py.File(exp_data_obj, 'r') as file:
-        exp_data = {'x': jnp.asarray(file['probes']['x']),
-                    't': jnp.asarray(file['probes']['t']),
-                    'solution': jnp.asarray(file['exact']['solution'])
-                    }
+        exp_data = objects.ExperimentalData(x=jnp.asarray(file['probes']['x']),
+                                            t=jnp.asarray(file['probes']['t']),
+                                            solution=jnp.asarray(file['exact']['solution']))
     with h5py.File(num_solution_obj, 'r') as file:
         BC = {'u0': jnp.asarray(file['settings']['u0']), 
               'uL': jnp.asarray(file['settings']['uL']), 
@@ -407,7 +423,7 @@ def read_input_data(input_obj, num_solution_obj, exp_data_obj, solver):
         else:
             beta_exact = None
     problem = objects.Problem(mesh=generate_mesh(input_data), BC=BC, nu=nu, 
-                              solver_fun=solver)
+                              solver_fun=solver, STEADY=input_data['steady'])
     
     return problem, beta_exact, exp_data
 

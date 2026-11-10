@@ -91,7 +91,6 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
         CHECK = input_data['options']['check_outputs']
         VIDEO = input_data['options']['show_videos']
         BATCH = input_data['options']['batch_mode']
-        STEADY = input_data['steady']
         hessian_model = input_data['hessian']
         optimiser_opts = input_data['optimisation']
         
@@ -147,14 +146,14 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
     
     #%% LAUNCH CODE
     if POST_PROC:
-        fiml.main.postprocessing(FIML_file, probes_file, out_dir, solve_Burgers, 
-                                 nu, beta_exact=beta_exact, sol_exact=sol_exact)
+        return fiml.main.postprocessing(FIML_file, probes_file, out_dir, solve_Burgers, 
+                                        nu, beta_exact=beta_exact, sol_exact=sol_exact)
     if ANALYSIS:
-        fiml.main.analysis(exp_data, problem, out_dir, beta_opts,
-                           sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,
-                           N_WORKERS, RUN_PARALLEL, optimiser_opts, CHECK, VIDEO,
-                           beta_exact, BATCH, IDX_TIME_PLOT=-1, STEADY=STEADY, hessian=hessian_model,
-                           input_file=run_input_file)
+        return fiml.main.analysis(exp_data, problem, out_dir, beta_opts,
+                                  sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,
+                                  N_WORKERS, RUN_PARALLEL, optimiser_opts, CHECK, VIDEO,
+                                  beta_exact, BATCH, IDX_TIME_PLOT=-1, hessian=hessian_model,
+                                  input_file=run_input_file)
 
 if __name__ == '__main__':
     #cli(['--post', str(DEFAULT_OUTPUT)])

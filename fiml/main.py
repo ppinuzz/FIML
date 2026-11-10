@@ -21,8 +21,7 @@ import fiml.fiml as fiml
 import fiml.auxiliaries as aux
 import fiml.post as post
 import fiml.beta as betamod
-
-from fiml.objects import *
+import fiml.objects as objs
 
 
 def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh, 
@@ -81,10 +80,10 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
     return run_id, solution, max_res, success
 
 
-def analysis(exp_data, problem_obj, out_dir, beta_opts, sigma2_prior, 
+def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior, 
              N_sampling_prior, N_sampling_post, SEED, sigma2_obs, N_WORKERS, RUN_PARALLEL,
              optimiser_opts, CHECK=False, VIDEO=False, beta_exact=None, BATCH=False,
-             IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True, STEADY=True, hessian='full',
+             IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True, hessian='full',
              input_file=None):
     
     if BATCH:
@@ -104,29 +103,15 @@ def analysis(exp_data, problem_obj, out_dir, beta_opts, sigma2_prior,
     comprex_opts = {'shuffle': True, 'compression': 'gzip', 'compression_opts': 9}
     
     # MESH DATA
-    solver_fun = problem_obj.solver_fun
-    nu = problem_obj.nu
-    x_mesh = problem_obj.x_mesh
-    t_mesh = problem_obj.t_mesh
-    N_x = x_mesh.size
-    N_t = t_mesh.size
-    #L = x_mesh[-1] - x_mesh[0]
+    x_mesh = problem.x_mesh
+    t_mesh = problem.t_mesh
+    STEADY = problem.STEADY
+    T = problem.T
+    
+    N_x = problem.Nx
+    N_t = problem.Nt
     t0 = t_mesh[0]
-    if N_t == 1:
-        aux.warning('Steady problem: initial conditions, time length and dt will be ignored')
-        T = None
-        dt = None
-        STEADY = True
-    else:
-        T = t_mesh[-1] - t_mesh[0]
-        dt = t_mesh[1] - t_mesh[0]
-        STEADY = False
-        if not jnp.all(jnp.isclose(jnp.diff(t_mesh), dt)):
-            raise ValueError('Only uniform time grids are supported')
-    # HACK: assuming uniform spacing in time and space
-    dx = x_mesh[1] - x_mesh[0]
-    if not jnp.all(jnp.isclose(jnp.diff(x_mesh), dx)):
-        raise ValueError('Only uniform space grids are supported')
+    dt = problem.dt
     
     hdf5_group = out_file.create_group('mesh')
     tmp_set = hdf5_group.create_dataset(name='x', data=x_mesh, **comprex_opts)
@@ -144,34 +129,21 @@ def analysis(exp_data, problem_obj, out_dir, beta_opts, sigma2_prior,
                         "skipping them...")
         beta_opts['N_basis_t'] = None
     
-    
-    # BOUNDARY CONDITIONS
-    BC = problem_obj.BC
-    u0 = problem_obj.u0
-    uL = problem_obj.uL
-    #u_IC_fun = problem_obj.u_IC_fun     # function u0(x)
-    u_IC = problem_obj.u_IC
-    
     print(f'Saving boundary conditions to \n\t{out_filename.resolve()}...')
     hdf5_group = out_file.create_group('boundary_conditions')
-    aux.save_dict_to_hdf5(BC, hdf5_group)
+    aux.save_dict_to_hdf5(problem.BC, hdf5_group)
     out_file.flush()
-    
-    # EXPERIMENTAL DATA
-    x_exp = jnp.asarray(exp_data['x'])
-    t_exp = jnp.asarray(exp_data['t'])
-    sol_exp = jnp.asarray(exp_data['solution'])
     
     if SAVE_EXP:
         # save experimental data to file using the same format as solution data
         # (for reproducibility)
         exp_out_file = h5py.File(out_dir/'experiments.h5', 'w')
-        tmp_set = exp_out_file.create_dataset(name='solution', data=sol_exp, **comprex_opts)
+        tmp_set = exp_out_file.create_dataset(name='solution', data=exp_data.solution, **comprex_opts)
         tmp_set.attrs['description'] = ('The i-th row contains all the experimental data at the i-th time instant, '
                                         'each column is a different probe')
-        tmp_set = exp_out_file.create_dataset(name='x', data=x_exp, **comprex_opts)
+        tmp_set = exp_out_file.create_dataset(name='x', data=exp_data.x, **comprex_opts)
         tmp_set.attrs['description'] = 'Probes coordinates'
-        tmp_set = exp_out_file.create_dataset(name='t', data=t_exp, **comprex_opts)
+        tmp_set = exp_out_file.create_dataset(name='t', data=exp_data.t, **comprex_opts)
         tmp_set.attrs['description'] = 'Time instants acquired in the experiment'
         # write to disk without closing the file
         print(f'Writing experimental data to \n\t{Path(exp_out_file.filename).resolve()}')
@@ -182,19 +154,19 @@ def analysis(exp_data, problem_obj, out_dir, beta_opts, sigma2_prior,
         # time instant (or that, at least, the simulation is longer than the experiment)
         # discretisation with step dt => any number within -dt/2 and +dt/2 is associated
         # to the instant 0
-        if t_exp[0] < t0-0.5*dt or t_exp[0] > t0+0.5*dt:
+        if exp_data.t[0] < t0-0.5*dt or exp_data.t[0] > t0+0.5*dt:
             raise ValueError('Experimental data and simulation must start at the same time instant '
                              '(within a dt/2)\n'
-                             f'Experimental data t0  : {t_exp[0]} s\n'
+                             f'Experimental data t0  : {exp_data.t[0]} s\n'
                              f'Simulation t0         : {t0} s\n')
-        if T < t_exp[-1]:
+        if T < exp_data.t[-1]:
             aux.warning('Numerical simulation is shorter than the experimental data: \n'
                         f'T numerical: {T} s\n'
-                        f'T experiment: {t_exp[-1]} s\n'
+                        f'T experiment: {exp_data.t[-1]} s\n'
                         f'Limiting experimental data to numerical simulation end time T = {T} s')
-            idx_valid = (t_exp <= T)
-            t_exp = t_exp[idx_valid]
-            sol_exp = sol_exp[idx_valid, :]
+            idx_valid = (exp_data.t <= T)
+            exp_data.t = exp_data.t[idx_valid]
+            exp_data.solution = exp_data.solution[idx_valid, :]
     
     
     # copy content of the input file to output (for reproducibility's sake)
@@ -214,13 +186,16 @@ def analysis(exp_data, problem_obj, out_dir, beta_opts, sigma2_prior,
     #%% PARAMETRISE CORRECTION FUNCTION BETA
     
     beta_fun, beta_params = betamod.parametrise_beta(beta_opts, x_mesh, t_mesh, STEADY)
-    N_theta = beta_params['N_params']
+    FIML = objs.FieldInversionObject(problem=problem, exp_data=exp_data,
+                                     beta_fun=beta_fun, beta_params=beta_params,
+                                     beta_opts=beta_opts)
+    N_theta = FIML.N_params
     
-    print(f'Available data points: {sol_exp.size}')
+    print(f'Available data points: {exp_data.solution.size}')
     print(f'Unknown parameters: {N_theta}')
-    if sol_exp.size < N_theta:
+    if exp_data.solution.size < N_theta:
         aux.warning(f'Under-determined system: {N_theta} to find, but only '
-                    f'{sol_exp.size} data points')
+                    f'{exp_data.solution.size} data points')
     
     
     #%% DRAW FROM PRIOR DISTRIBUTION
@@ -238,70 +213,63 @@ def analysis(exp_data, problem_obj, out_dir, beta_opts, sigma2_prior,
                                               N_sampling_prior, key_random)
     
 
-    #%% SOLVE CORRECTED BURGERS' EQUATION
+    #%% SOLVE CORRECTED BURGERS' EQUATION => PRIOR DISTRIBUTION
     
-    solution_corrected, max_res_corrected, success_corrected = fiml.launch_sampling(theta_prior_samples, run_solver_case, solver_fun, N_x, N_t, 
-                    N_sampling_prior, (beta_fun, nu, x_mesh, t_mesh, u_IC, u0, uL, STEADY), RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
+    FIML.prior = fiml.launch_sampling(
+                    theta_prior_samples, run_solver_case, problem.solver_fun, N_x, N_t, 
+                    N_sampling_prior, problem.solver_args(beta_fun), 
+                    RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
+    FIML.prior.key_random = jax.random.key_data(key_random)
+    FIML.prior.x = problem.x_mesh
+    FIML.prior.t = problem.t_mesh
     
-    beta_corrected = jax.vmap(lambda theta, u: beta_fun(theta, u=u),
-                              # theta is a row vector of columns => pick one column
-                              # of theta at a time => index 1
-                              # u is ordered as a (Nx, Nt, N_samples) matrix =>
-                              # calculate beta for each sample solution => index 2
-                              in_axes=(1, 2),
-                              # store results in the 3rd dimension, "one per layer"
-                              out_axes=2
-                              )(theta_prior_samples, solution_corrected)
-    aux.save_sampling(out_file, 'prior', comprex_opts, theta_prior_samples, 
-                      solution_corrected, max_res_corrected, success_corrected,
-                      beta_corrected, jax.random.key_data(key_random))
+    # save both cleaned runs (e.g. 'FIML.prior.solution') and original runs,
+    # with non-converged or failed runs (e.g. 'FIML.prior.solution_orig')
+    aux.save_sampling(out_file, 'prior', comprex_opts, FIML.prior, save_failed_runs=True)
     
-    solution_corrected, max_res_corrected = fiml.handle_failed_runs(
-                                                (solution_corrected, max_res_corrected), 
-                                                success_corrected, 
-                                                strategy='remove')
-    N_sampling_prior = solution_corrected.shape[-1]
-    if N_sampling_prior == 0:
+    if FIML.prior.N_valid == 0:
         raise RuntimeError('All simulations failed during prior sampling, no data to '
                            'evaluate prior distribution')
         
     
     #%% CHECK: DO THE OBSERVED DATA LIE WITHIN +/- 2*SIGMA?
     
-    post.check_experiments_in_sigma_band(solution_corrected, sol_exp, x_mesh, 
-                                         t_mesh, x_exp, t_exp, N_sigma=2, 
-                                         t_plot=t_exp[IDX_TIME_PLOT], 
+    post.check_experiments_in_sigma_band(FIML.prior, exp_data, N_sigma=2, 
+                                         t_plot=exp_data.t[IDX_TIME_PLOT], 
                                          fig_file=out_dir/'meanSigmaExpPrior', PLOT=PLOT)
     
     
     #%% FIND MAXIMUM-A-POSTERIORI BETA/THETA
     
-    def h_theta_sampled(theta, beta_fun, nu, x_mesh, t_mesh, u_IC, u0, uL, STEADY,
-                        x_probes, t_probes):
+    def h_theta(theta):
         # run_id, solution, max_res
         # k-th row of solution: [t^k, u_1^k, ..., u_Nx^k] = [t^k, u(t^k)]
-        _, sol, _, success = run_solver_case(None, theta, solver_fun, beta_fun, nu, 
-                                             x_mesh, t_mesh, u_IC, u0, uL, STEADY,
+        _, sol, _, success = run_solver_case(None, theta, problem.solver_fun, 
+                                             *problem.solver_args(beta_fun),
                                              out_dir=None, PRINT_ERR_MSG=False)
         # sample numerical solution to have it at the same probe locations
         # [t^k, u_1^k, ...m u_Np^k]     Np = N. of probes
         sol_probes = aux.sample_solution(sol, x_mesh=x_mesh, t_mesh=t_mesh, 
-                                         x_probes=x_probes, t_probes=t_probes)
+                                         x_probes=exp_data.x, t_probes=exp_data.t)
         # create a column vector of column vectors to gather the entire solution
         # as [u(x,t^0), ..., u(x,t^Nt)] => flatten array in column-major order 
         # (Fortran-style) 
         sol_vet = jnp.ravel(sol_probes.T)
         return sol_vet, success
-    
-    h_theta = lambda theta: h_theta_sampled(theta, beta_fun, nu, x_mesh, t_mesh, 
-                                            u_IC, u0, uL, STEADY, x_exp, t_exp)
+
     # check that covariance matrix is finite, symmetryc, positive semi-definite
     aux.check_covariance_matrix(sigma2_obs)
+    
+    # pass data (exp_data) as a column vector of column vectors => (...).T
+    FIML.cost = objs.CostFunction(data=jnp.ravel(exp_data.solution.T),
+                                 h_theta=h_theta, 
+                                 C_data=sigma2_obs,
+                                 C_theta=sigma2_prior,
+                                 theta_prior=theta_prior
+                                 )
 
     def cost_and_status(theta):
-        # pass data as a column vector of column vectors
-        cost, success = fiml.cost_function(theta, d=jnp.ravel(sol_exp.T), h_theta=h_theta, 
-                                  Cm=sigma2_obs, C_theta=sigma2_prior, theta_prior=theta_prior)
+        cost, success = FIML.cost(theta)
         return cost, success
 
     @jax.jit
@@ -320,6 +288,8 @@ def analysis(exp_data, problem_obj, out_dir, beta_opts, sigma2_prior,
         # (the actual numerical output)
         grad, (cost, success) = jax.jacfwd(cost_with_aux, has_aux=True)(theta)
         return cost, grad, success
+
+    FIML.jacobian = lambda theta: cost_and_jacobian(theta)[1]
     
     
     print('Minimising the cost function J(theta) to find maximum-a-posteriori '
@@ -352,22 +322,25 @@ def analysis(exp_data, problem_obj, out_dir, beta_opts, sigma2_prior,
     aux.check_optimiser_results(opt)
     
     theta_MAP = opt.x
-    _, sol_MAP, max_res_MAP, success_MAP = run_solver_case(None, theta_MAP, solver_fun, 
-                                            beta_fun, nu, x_mesh, t_mesh,
-                                            u_IC, u0, uL, STEADY, out_dir=None)
-    beta_r = beta_fun(theta_MAP, u=sol_MAP)
-    aux.print_theta(theta_MAP, theta_prior, STEADY, t_mesh=None, t=None)
+    _, sol_MAP, max_res_MAP, success_MAP = run_solver_case(None, theta_MAP, problem.solver_fun, 
+                                            *problem.solver_args(beta_fun), out_dir=None)
+    
+    FIML.MAP = objs.MAPResult(theta=theta_MAP, solution=sol_MAP, 
+                              beta=beta_fun(theta_MAP, u=sol_MAP),
+                              max_res=max_res_MAP, success=success_MAP, opt=opt,
+                              x=problem.x_mesh, t=problem.t_mesh)
+    
+    aux.print_theta(FIML.MAP.theta, theta_prior, problem.STEADY, problem.t_mesh)
     
     start_time = perf_counter()
-    cost_and_jacobian(theta_MAP)
+    FIML.MAP.jacobian = cost_and_jacobian(FIML.MAP.theta)[1]  # cost, jacobian, success
     t_elapsed = perf_counter() - start_time
     print(f'Time required to evaluate cost function jacobian: {t_elapsed:.3e} s')
     
-    aux.save_sampling(out_file, 'MAP', comprex_opts, theta_MAP, sol_MAP, 
-                      max_res_MAP, success_MAP, beta_r, key_random=None)
+    aux.save_sampling(out_file, 'MAP', comprex_opts, FIML.MAP)
     
     if CHECK and beta_exact is not None:
-        post.compare_exact_beta(beta_r, beta_exact['beta'], 
+        post.compare_exact_beta(FIML.MAP.beta, beta_exact['beta'], 
                                 x_mesh, t_mesh, beta_exact['x'], beta_exact['t'], 
                                 t_plot=beta_exact['t'][-1], fig_file=out_dir/'checkBeta', 
                                 PLOT=PLOT, VIDEO=VIDEO)
@@ -378,12 +351,12 @@ def analysis(exp_data, problem_obj, out_dir, beta_opts, sigma2_prior,
     
     #%% CHECK MAP SOLUTION VS BASELINE
     
-    solver_wrap = lambda theta: run_solver_case(None, theta, solver_fun, beta_fun, 
-                                                nu, x_mesh, t_mesh, u_IC, u0, uL, 
-                                                STEADY, out_dir=None)
+    solver_wrap = lambda theta: run_solver_case(None, theta, problem.solver_fun,
+                                                *problem.solver_args(beta_fun), 
+                                                out_dir=None)
     # baseline solution: beta = 1 => theta = 0
-    fiml.compare_baseline_MAP_solutions(sol_MAP, jnp.zeros_like(theta_MAP), solver_wrap, 
-                                        sol_exp, x=x_mesh, x_exp=x_exp, t=t_mesh, t_exp=t_exp,
+    fiml.compare_baseline_MAP_solutions(FIML.MAP, jnp.zeros_like(FIML.MAP.theta), solver_wrap, 
+                                        exp_data, t=t_mesh, t_exp=exp_data.t,
                                         PLOT=PLOT)
 
     
@@ -392,18 +365,18 @@ def analysis(exp_data, problem_obj, out_dir, beta_opts, sigma2_prior,
     print('Calculating the (approximate) posterior covariance matrix as inverse of the hessian matrix @ MAP...')
     match hessian.lower():
         case 'full':
-            H_MAP = jax.jacfwd(jax.jacfwd(J_cost_fun))(theta_MAP)
+            H_MAP = jax.jacfwd(jax.jacfwd(J_cost_fun))(FIML.MAP.theta)
         case 'gauss_newton':
             # h_theta returns the solution and the success flag => pass a wrapper
             # function that returns only the solution, to avoid having JAX
             # differentiating w.r.t. the flag
             H_MAP = fiml.Gauss_Newton_hessian(lambda theta: h_theta(theta)[0], 
-                                              theta_MAP, sigma2_obs, sigma2_prior)
+                                              FIML.MAP.theta, sigma2_obs, sigma2_prior)
         case 'test':
             aux.warning('Calculating the Hessian matrix using all available options...')
-            H_MAP_full = jax.jacfwd(jax.jacfwd(J_cost_fun))(theta_MAP)
+            H_MAP_full = jax.jacfwd(jax.jacfwd(J_cost_fun))(FIML.MAP.theta)
             H_MAP_GN = fiml.Gauss_Newton_hessian(lambda theta: h_theta(theta)[0], 
-                                                 theta_MAP, sigma2_obs, sigma2_prior)
+                                                 FIML.MAP.theta, sigma2_obs, sigma2_prior)
             err_GN = jnp.linalg.norm(H_MAP_GN - H_MAP_full) / jnp.linalg.norm(H_MAP_full)
             aux.warning(f'Gauss-Newton vs Exact Frobenius-norm error: {err_GN:.5e}')
             H_MAP = H_MAP_full
@@ -411,48 +384,42 @@ def analysis(exp_data, problem_obj, out_dir, beta_opts, sigma2_prior,
             raise ValueError(f"Unknown Hessian matrix option '{hessian}'")
     t_elapsed = perf_counter() - start_time
     print(f'Time required to evaluate cost function hessian: {t_elapsed:.3e} s')
-    aux.check_hessian(H_MAP)
+    
+    FIML.MAP.hessian = H_MAP
+    aux.check_hessian(FIML.MAP.hessian)
     # rather than inverting H with inv(H), calculate is solving the linear
     # system H*H_inv = I
-    C_theta_MAP = jnp.linalg.solve(H_MAP, jnp.eye(theta_MAP.size))
+    FIML.MAP.covariance = jnp.linalg.solve(FIML.MAP.hessian, jnp.eye(FIML.MAP.theta.size))
     
     
     #%% EVALUATE A-POSTERIORI DISTRIBUTION
     
     print(f'Drawing {N_sampling_post} samples of the {N_theta}-components theta vector a-posteriori...')
     key_random = aux.generate_key(SEED)
-    theta_post_samples = fiml.posterior_sampling(theta_MAP, C_theta_MAP, N_sampling_post, key_random)
+    theta_post_samples = fiml.posterior_sampling(FIML.MAP.theta, FIML.MAP.covariance, N_sampling_post, key_random)
     
-    solution_posterior, max_res_posterior, success_posterior = fiml.launch_sampling(theta_post_samples, run_solver_case, solver_fun, N_x, N_t, 
-                    N_sampling_post, (beta_fun, nu, x_mesh, t_mesh, u_IC, u0, uL, STEADY), RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
-    beta_posterior = jax.vmap(lambda theta, u: beta_fun(theta, u=u), 
-                              in_axes=(1, 2), out_axes=2
-                              )(theta_post_samples, solution_posterior)
+    FIML.posterior = fiml.launch_sampling(
+                        theta_post_samples, run_solver_case, problem.solver_fun, 
+                        N_x, N_t, N_sampling_post, problem.solver_args(beta_fun),
+                        RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
+    FIML.posterior.key_random = jax.random.key_data(key_random)
+    FIML.posterior.x = problem.x_mesh
+    FIML.posterior.t = problem.t_mesh
     
-    aux.save_sampling(out_file, 'posterior', comprex_opts, theta_post_samples, 
-                      solution_posterior, max_res_posterior, success_posterior,
-                      beta_posterior, jax.random.key_data(key_random))
-    
-    solution_posterior, max_res_posterior = fiml.handle_failed_runs(
-                                                (solution_posterior, max_res_posterior), 
-                                                success_posterior, 
-                                                strategy='remove')
-    N_sampling_posterior = jnp.count_nonzero(success_posterior)
-    if N_sampling_posterior == 0:
+    aux.save_sampling(out_file, 'posterior', comprex_opts, FIML.posterior, save_failed_runs=True)
+    if FIML.posterior.N_valid == 0:
         raise RuntimeError('All simulations failed during posterior sampling, '
-                           'no data to evaluate prior distribution')
+                           'no data to evaluate posterior distribution')
     
     
     #%% CHECK POSTERIOR DISTRIBUTION AROUND MAP POINT
     
-    post.check_experiments_in_sigma_band(solution_posterior, sol_exp, x_mesh, 
-                                         t_mesh, x_exp, t_exp, N_sigma=2, 
-                                         t_plot=t_exp[IDX_TIME_PLOT], 
+    post.check_experiments_in_sigma_band(FIML.posterior, exp_data, N_sigma=2, 
+                                         t_plot=exp_data.t[IDX_TIME_PLOT], 
                                          fig_file=out_dir/'meanSigmaExpPosterior', PLOT=PLOT)
     
-    post.compare_prior_posterior(solution_corrected, solution_posterior, sol_exp, 
-                                 x_mesh, t_mesh, x_exp, t_exp, N_sigma=2, 
-                                 t_plot=t_exp[IDX_TIME_PLOT], 
+    post.compare_prior_posterior(FIML.prior, FIML.posterior, exp_data, 
+                                 N_sigma=2, t_plot=exp_data.t[IDX_TIME_PLOT], 
                                  fig_file=out_dir/'priorVSposterior', PLOT=PLOT)
     
     
@@ -487,6 +454,8 @@ def analysis(exp_data, problem_obj, out_dir, beta_opts, sigma2_prior,
             plt.show(block=True)
         finally:
             timer.stop()
+    
+    return FIML
 
 
 

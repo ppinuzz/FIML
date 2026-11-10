@@ -14,6 +14,7 @@ import jax.random as jrn
 #from functools import partial
 import fiml.parallel as parallel
 import fiml.auxiliaries as aux
+import fiml.objects as objs
 from prettytable import PrettyTable
 import scipy.optimize as sciopt
 import optax
@@ -92,19 +93,19 @@ def handle_failed_runs(run_data, success, strategy='remove', MAX_FAIL_RATE=0.01)
     return clean_data
 
 
-def compare_baseline_MAP_solutions(sol_MAP, theta_baseline, solver_wrap, 
-                                   sol_exp, x, x_exp, t=None, t_exp=None,
+def compare_baseline_MAP_solutions(MAP, theta_baseline, solver_wrap, 
+                                   exp, t=None, t_exp=None,
                                    PLOT=True, fig_name=None):
     # baseline solution (beta = 1 => theta = 0)
     _, sol_baseline, _, _ = solver_wrap(theta_baseline)
     # sample both solutions at probe locations
-    sol_MAP_probes = aux.sample_solution(sol_MAP, x_mesh=x, t_mesh=t, 
-                                         x_probes=x_exp, t_probes=t_exp)
-    sol_baseline_probes = aux.sample_solution(sol_baseline, x_mesh=x, t_mesh=t, 
-                                              x_probes=x_exp, t_probes=t_exp)
+    sol_MAP_probes = aux.sample_solution(MAP.solution, x_mesh=MAP.x, t_mesh=t, 
+                                         x_probes=exp.x, t_probes=t_exp)
+    sol_baseline_probes = aux.sample_solution(sol_baseline, x_mesh=MAP.x, t_mesh=t, 
+                                              x_probes=exp.x, t_probes=t_exp)
     # errors w.r.t. experimental data (actual truth)
-    err_MAP = sol_MAP_probes - sol_exp
-    err_baseline = sol_baseline_probes - sol_exp
+    err_MAP = sol_MAP_probes - exp.solution
+    err_baseline = sol_baseline_probes - exp.solution
     
     # mean absolute error > 0
     MAE_MAP = jnp.mean(jnp.abs(err_MAP))
@@ -257,7 +258,14 @@ def launch_sampling(theta_samples, run_solver_case, solver_fun, N_x, N_t, N_samp
 
     run_type = 'Parallel' if RUN_PARALLEL else 'Sequential'
     print(f'{run_type} execution finished')
-    return solution, max_residual, success
+    
+    beta_fun = solver_args[0]
+    sampling_results = objs.SamplingResult(theta_orig=theta_samples, 
+                                           solution_orig=solution,
+                                           max_res_orig=max_residual, 
+                                           success_orig=success,
+                                           beta_fun=beta_fun)
+    return sampling_results
 
 
 def minimise_cost_function(cost_and_jacobian, x0, method='amsgrad',

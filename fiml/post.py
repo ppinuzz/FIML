@@ -14,19 +14,19 @@ import fiml.beta as betamod
 from prettytable import PrettyTable
 
 
-def check_experiments_in_sigma_band(sol, exp, x, t, x_exp, t_exp, ax_sol=2, 
-                                    N_sigma=2, t_plot=None, fig_file=None, 
-                                    PLOT=True, VIDEO=False):
-    sol = jnp.asarray(sol)
+def check_experiments_in_sigma_band(sol, exp, ax_sol=2, N_sigma=2, t_plot=None, 
+                                    fig_file=None, PLOT=True, VIDEO=False):
     # HACK: assicurati nel solver the la dimensione sia (Nt, Nx, N_sample),
     # non qui
-    if sol.ndim != 3:
-        sol = sol[jnp.newaxis, ...]
+    if sol.solution.ndim != 3:
+        sol_values = sol.solution[jnp.newaxis, ...]
+    else:
+        sol_values = sol.solution
     # for each space-time point, calculate the sample mean of the solutions
     # obtained solving the equation for each sample
     # (1st index: space, 2nd index: time, 3rd index: sampling)
-    u_mean = jnp.mean(sol, axis=ax_sol)
-    u_sigma = jnp.std(sol, axis=ax_sol)
+    u_mean = jnp.mean(sol_values, axis=ax_sol)
+    u_sigma = jnp.std(sol_values, axis=ax_sol)
     u_upper = u_mean + N_sigma*u_sigma
     u_lower = u_mean - N_sigma*u_sigma
     
@@ -35,27 +35,27 @@ def check_experiments_in_sigma_band(sol, exp, x, t, x_exp, t_exp, ax_sol=2,
     if t_plot is None:
         idx_plot_exp = -1
         aux.warning('No time instant given, the last instant '
-                    f't = {t_exp[idx_plot_exp]} s will be plotted...')
+                    f't = {exp.t[idx_plot_exp]} s will be plotted...')
     else:
-        if t_plot < t_exp[0] or t_plot > t_exp[-1]:
+        if t_plot < exp.t[0] or t_plot > exp.t[-1]:
             raise ValueError('Given time instant lies outside of the experimental range: \n'
                              f'Given time: {t_plot} s\n'
-                             f'Experimental range: {t_exp[0]}-{t_exp[-1]} s')
+                             f'Experimental range: {exp.t[0]}-{exp.t[-1]} s')
         # find experimental point closest to the given time instant
-        idx_plot_exp = jnp.argmin(jnp.abs(t_exp - t_plot))
+        idx_plot_exp = jnp.argmin(jnp.abs(exp.t - t_plot))
     # interpolate numerical solution to the chosen experimental point 
     # (do NOT interpolate experimental data, as that could be meaningless!)
-    t_exp_plot = t_exp[idx_plot_exp]
-    u_mean_t = aux.sample_solution(u_mean, t_mesh=t, t_probes=t_exp)
-    u_up_t = aux.sample_solution(u_upper, t_mesh=t, t_probes=t_exp)
-    u_low_t = aux.sample_solution(u_lower, t_mesh=t, t_probes=t_exp)
+    t_exp_plot = exp.t[idx_plot_exp]
+    u_mean_t = aux.sample_solution(u_mean, t_mesh=sol.t, t_probes=exp.t)
+    u_up_t = aux.sample_solution(u_upper, t_mesh=sol.t, t_probes=exp.t)
+    u_low_t = aux.sample_solution(u_lower, t_mesh=sol.t, t_probes=exp.t)
     
     # interpolate numerical data at probe locations to check whethet experimental
     # data lie withing +/- 2*sigma from the sample mean
-    u_upper_probes = aux.sample_solution(u_upper, x_mesh=x, t_mesh=t, x_probes=x_exp, t_probes=t_exp)
-    u_lower_probes = aux.sample_solution(u_lower, x_mesh=x, t_mesh=t, x_probes=x_exp, t_probes=t_exp)
+    u_upper_probes = aux.sample_solution(u_upper, x_mesh=sol.x, t_mesh=sol.t, x_probes=exp.x, t_probes=exp.t)
+    u_lower_probes = aux.sample_solution(u_lower, x_mesh=sol.x, t_mesh=sol.t, x_probes=exp.x, t_probes=exp.t)
     
-    lies_within = (exp <= u_upper_probes) & (exp >= u_lower_probes)
+    lies_within = (exp.solution <= u_upper_probes) & (exp.solution >= u_lower_probes)
     N_within_t = jnp.count_nonzero(lies_within[idx_plot_exp,:])
     N_probes = lies_within[idx_plot_exp,:].size
     fraction_within_t = N_within_t / N_probes
@@ -67,17 +67,17 @@ def check_experiments_in_sigma_band(sol, exp, x, t, x_exp, t_exp, ax_sol=2,
                   f'lie within +/- {N_sigma} standard deviations from the sample mean')
     
     # interpolate solution at t = t_plot on probe locations
-    u_mean_probes = aux.sample_solution(u_mean_t[idx_plot_exp,:], x_mesh=x, x_probes=x_exp)
-    delta_u = u_mean_probes - exp[idx_plot_exp,:]
-    err = delta_u / exp[idx_plot_exp,:]
+    u_mean_probes = aux.sample_solution(u_mean_t[idx_plot_exp,:], x_mesh=sol.x, x_probes=exp.x)
+    delta_u = u_mean_probes - exp.solution[idx_plot_exp,:]
+    err = delta_u / exp.solution[idx_plot_exp,:]
     
     
     err_report = PrettyTable()
     err_report.title = f'Mean of the distribution vs Experimental data at t = {t_exp_plot:.5f} s'
     err_report.field_names = ['x', 'Mean', 'Experiment', 'Difference', 'Relative error [%]']
-    for k in range(exp.shape[1]):
-        err_report.add_row([f'{x_exp[k]:.5f}', f'{u_mean_probes[k]:.5f}',
-                            f'{exp[idx_plot_exp,k]:.5f}', f'{delta_u[k]:.5f}', 
+    for k in range(exp.solution.shape[1]):
+        err_report.add_row([f'{sol.x[k]:.5f}', f'{u_mean_probes[k]:.5f}',
+                            f'{exp.solution[idx_plot_exp,k]:.5f}', f'{delta_u[k]:.5f}', 
                             f'{100*err[k]:.2f}'])
     aux.check_msg(err_report.get_string())
     
@@ -87,11 +87,11 @@ def check_experiments_in_sigma_band(sol, exp, x, t, x_exp, t_exp, ax_sol=2,
         #sol_exp_t = jnp.ravel(sol_exp_interp_t.T)
         
         fig = plt.figure()
-        plt.plot(x, u_mean_t[idx_plot_exp,:], label='Sample mean', color='r')
-        plt.fill_between(x, u_up_t[idx_plot_exp,:], u_low_t[idx_plot_exp,:], alpha=0.3, color='r')
+        plt.plot(sol.x, u_mean_t[idx_plot_exp,:], label='Sample mean', color='r')
+        plt.fill_between(sol.x, u_up_t[idx_plot_exp,:], u_low_t[idx_plot_exp,:], alpha=0.3, color='r')
         #plt.plot(x, u_up_t[idx_plot_exp,:], color='r')
         #plt.plot(x, u_low_t[idx_plot_exp,:], color='r')
-        plt.plot(x_exp, exp[idx_plot_exp,:], '*', label='Experiment')
+        plt.plot(exp.x, exp.solution[idx_plot_exp,:], '*', label='Experiment')
         plt.xlabel('$x$ [-]')
         plt.ylabel('$u$ [-]')
         plt.autoscale(enable=True, axis='x', tight=True)
@@ -240,26 +240,36 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
         
         
 
-def compare_prior_posterior(prior, posterior, exp, x, t, x_exp, t_exp, ax_sol=2,
-                            N_sigma=2, t_plot=None, fig_file=None, 
-                            PLOT=True, VIDEO=False):
+def compare_prior_posterior(prior, post, exp, ax_sol=2, N_sigma=2, t_plot=None, 
+                            fig_file=None, PLOT=True, VIDEO=False):
+    
+    if ~jnp.all(jnp.isclose(prior.x, post.x)):
+        raise ValueError('Spatial mesh of prior and posterior samples are different')
+    if ~jnp.all(jnp.isclose(prior.t, post.t)):
+        raise ValueError('Time mesh of prior and posterior samples are different')
+    x = prior.x
+    t = prior.t
     
     # HACK: assicurati nel solver the la dimensione sia (Nt, Nx, N_sample),
     # non qui
-    if prior.ndim != 3:
-        prior = prior[jnp.newaxis, ...]
-    if posterior.ndim != 3:
-        posterior = posterior[jnp.newaxis, ...]
+    if prior.solution.ndim != 3:
+        prior_sol = prior.solution[jnp.newaxis, ...]
+    else:
+        prior_sol = prior.solution
+    if post.solution.ndim != 3:
+        posterior_sol = post.solution[jnp.newaxis, ...]
+    else:
+        posterior_sol = post.solution
     # for each space-time point, calculate the sample mean of the solutions
     # obtained solving the equation for each sample
     # (1st index: space, 2nd index: time, 3rd index: sampling)
-    u_mean_prior = jnp.mean(prior, axis=ax_sol)
-    u_sigma_prior = jnp.std(prior, axis=ax_sol)
+    u_mean_prior = jnp.mean(prior_sol, axis=ax_sol)
+    u_sigma_prior = jnp.std(prior_sol, axis=ax_sol)
     u_upper_prior = u_mean_prior + N_sigma*u_sigma_prior
     u_lower_prior = u_mean_prior - N_sigma*u_sigma_prior
     
-    u_mean_post = jnp.mean(posterior, axis=ax_sol)
-    u_sigma_post = jnp.std(posterior, axis=ax_sol)
+    u_mean_post = jnp.mean(posterior_sol, axis=ax_sol)
+    u_sigma_post = jnp.std(posterior_sol, axis=ax_sol)
     u_upper_post = u_mean_post + N_sigma*u_sigma_post
     u_lower_post = u_mean_post - N_sigma*u_sigma_post
     
@@ -268,16 +278,16 @@ def compare_prior_posterior(prior, posterior, exp, x, t, x_exp, t_exp, ax_sol=2,
     if t_plot is None:
         idx_plot_exp = -1
         aux.warning('No time instant given, the last instant '
-                    f't = {t_exp[idx_plot_exp]} s will be plotted...')
+                    f't = {exp.t[idx_plot_exp]} s will be plotted...')
     else:
-        if t_plot < t_exp[0] or t_plot > t_exp[-1]:
+        if t_plot < exp.t[0] or t_plot > exp.t[-1]:
             raise ValueError('Given time instant lies outside of the experimental range: \n'
                              f'Given time: {t_plot} s\n'
-                             f'Experimental range: {t_exp[0]}-{t_exp[-1]} s')
+                             f'Experimental range: {exp.t[0]}-{exp.t[-1]} s')
         # find experimental point closest to the given time instant
-        idx_plot_exp = jnp.argmin(jnp.abs(t_exp - t_plot))
+        idx_plot_exp = jnp.argmin(jnp.abs(exp.t - t_plot))
     # actual time instant plotted 
-    t_exp_plot = t_exp[idx_plot_exp]
+    t_exp_plot = exp.t[idx_plot_exp]
     # interpolate numerical solution at that time instant
     u_mean_prior_exp = aux.sample_solution(u_mean_prior, x_mesh=x, t_mesh=t, t_probes=t_exp_plot)
     u_upper_prior_exp = aux.sample_solution(u_upper_prior, x_mesh=x, t_mesh=t, t_probes=t_exp_plot)
@@ -290,15 +300,11 @@ def compare_prior_posterior(prior, posterior, exp, x, t, x_exp, t_exp, ax_sol=2,
         fig = plt.figure()
         plt.plot(x, u_mean_prior_exp, label='Prior', color='r')
         plt.fill_between(x, u_upper_prior_exp, u_lower_prior_exp, alpha=0.3, color='r')
-        #plt.plot(x, u_upper_prior[idx_plot_exp,:], color='r')
-        #plt.plot(x, u_lower_prior[idx_plot_exp,:], color='r')
         
-        plt.plot(x, u_mean_post_exp, label='Posterior', color='b')
-        plt.fill_between(x, u_upper_post_exp, u_lower_post_exp, alpha=0.3, color='b')
-        #plt.plot(x, u_upper_post[idx_plot_exp,:], color='b')
-        #plt.plot(x, u_lower_post[idx_plot_exp,:], color='b')
+        plt.plot(post.x, u_mean_post_exp, label='Posterior', color='b')
+        plt.fill_between(post.x, u_upper_post_exp, u_lower_post_exp, alpha=0.3, color='b')
         
-        plt.plot(x_exp, exp[idx_plot_exp,:], 'k*', label='Experiment')
+        plt.plot(exp.x, exp.solution[idx_plot_exp,:], 'k*', label='Experiment')
         plt.xlabel('$x$ [-]')
         plt.ylabel('$u$ [-]')
         plt.autoscale(enable=True, axis='x', tight=True)
