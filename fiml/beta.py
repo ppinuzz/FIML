@@ -49,6 +49,7 @@ def read_beta_options(opts):
 
 
 def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
+    cond_num_Phi = None
     # calculate parameters common to several models
     params = {}
     match opts['model']:
@@ -73,6 +74,8 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             N_params = B_x.shape[0] * B_t.shape[0]
             params['B_x'] = B_x
             params['B_t'] = B_t
+            aux.warning(f'Bx condition number: {jnp.linalg.cond(B_x):.5e}')
+            aux.warning(f'Bt condition number: {jnp.linalg.cond(B_t):.5e}')
         case 'RBF_Gauss_x' | 'RBF_Gauss_x_softplus':
             print('Calculating Gaussian radial basis functions matrix Phi(x)...')
             x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['num_RBF'])
@@ -81,6 +84,7 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
                            in_axes=0, out_axes=1)(x_c)
             N_params = opts['num_RBF']
             params['Phi'] = Phi
+            cond_num_Phi = jnp.linalg.cond(Phi)
         case 'RBF_Gauss_u' | 'RBF_Gauss_u_softplus':
             x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['num_RBF'])
             N_params = opts['num_RBF']
@@ -101,6 +105,7 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             Phi = jnp.column_stack((Phi_RBF, P))
             params['Phi'] = Phi
             N_params = Phi.shape[1]
+            cond_num_Phi = jnp.linalg.cond(Phi)
         case 'RBF_Gauss_uu':
              u_lims = opts['u_limits']
              u_c = jnp.linspace(u_lims[0], u_lims[1], opts['num_RBF'])
@@ -110,6 +115,8 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             raise ValueError(f"Unknown beta model '{opts['model']}'")
     print(f'Number of theta parameters to identify: {N_params}')
     params['N_params'] = N_params
+    if cond_num_Phi is not None:
+        aux.warning(f'Phi condition number: {cond_num_Phi:.5e}')
     
     # wrap each beta function
     DEPENDS_ON_U = False
@@ -215,6 +222,7 @@ def _RBF_Gauss_u_Phi(x, x_c, u, K):
     # u_c.T: (N_RBF, Nt) => (1, N_RBF, Nt) to have same ordering as Phi
     # add the missing axis, with size 1, as jnp.newaxis
     Phi = jnp.exp(-K * (u.T[:,jnp.newaxis,:] - u_c.T[jnp.newaxis,:,:])**2)
+    aux.warning(f'Phi condition number: {jnp.linalg.cond(Phi):.5e}')
     return Phi
 
 def _RBF_Gauss_uu_Phi(u, u_c, K):
@@ -227,6 +235,7 @@ def _RBF_Gauss_uu_Phi(u, u_c, K):
     # u_c: (N_RBF,) => (1, N_RBF, 1) to have same ordering as Phi
     # add the missing axis, with size 1, as jnp.newaxis
     Phi = jnp.exp(-K * (u.T[:,jnp.newaxis,:] - u_c[jnp.newaxis,:,jnp.newaxis])**2)
+    aux.warning(f'Phi condition number: {jnp.linalg.cond(Phi):.5e}')
     return Phi
 
 def _beta_RBF_Gauss_x_softplus(theta_r, Phi, N_t, beta_ref, beta_min):
