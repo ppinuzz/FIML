@@ -363,6 +363,7 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
     #%% CALCULATE COVARIANCE OF THE POSTERIOR (HESSIAN)
     
     print('Calculating the (approximate) posterior covariance matrix as inverse of the hessian matrix @ MAP...')
+    start_time = perf_counter()
     match hessian.lower():
         case 'full':
             H_MAP = jax.jacfwd(jax.jacfwd(J_cost_fun))(FIML.MAP.theta)
