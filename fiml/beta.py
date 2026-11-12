@@ -278,10 +278,10 @@ def _sofplus_positivity_preserving(z, beta_min, beta_ref):
     beta = beta_min + (beta_ref - beta_min)*jax.nn.softplus(z)/jnp.log(2)
     return beta
 
-def _invert_softplus(beta, beta_min):
+def _invert_softplus(beta, beta_min, beta_ref=1):
     # beta = F(z) = beta_min + (1 - beta_min) * softplus(x) / ln(2)
     # invert it to obtain z = F^-1(beta)
-    w = (beta - beta_min) * jnp.log(2) / (1 - beta_min)
+    w = (beta - beta_min) * jnp.log(2) / (beta_ref - beta_min)
     z = jnp.log(jnp.expm1(w))
     return z
 
