@@ -16,6 +16,8 @@ jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
 import scipy.optimize as sciopt
 import h5py
+import cloudpickle
+import pickle
 
 import fiml.fiml as fiml
 import fiml.auxiliaries as aux
@@ -52,15 +54,21 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
     # check if solver didn't converge or produced NaN's/Inf's
     not_converged = (max_res >= TOL)
     nan_inf_values = jnp.any(~jnp.isfinite(solution), axis=1) | ~jnp.isfinite(max_res)
+    # HACK: implemented only for steady problems...
+    if STEADY:
+        beta_check = beta_fun(theta_r, x=x_mesh, t=t_mesh, u=solution)
+        N_beta_neg = jnp.count_nonzero(beta_check <= 0)
     # jax.lax.cond() replaces if (...) when the object is a JAX object in a JIT
     # compiled function
     jax.lax.cond(PRINT_ERR_MSG & jnp.any(not_converged), 
                  # jax.debug.print() replaces print() in JIT-compiled functions
                  lambda _: jax.debug.print(
-                             '{n_fail}/{n_tot} time instants did not converge for run {run_id}',
+                             '{n_fail}/{n_tot} time instants did not converge for run {run_id} (n. beta < 0: {N_beta_neg}/{N_beta})',
                              n_fail=jnp.count_nonzero(not_converged),
                              n_tot=not_converged.size,
-                             run_id=run_id),
+                             run_id=run_id,
+                             N_beta_neg=N_beta_neg,
+                             N_beta=beta_check.size),
                  lambda _: None,
                  operand=PRINT_ERR_MSG
                  )
@@ -68,10 +76,12 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
     jax.lax.cond(PRINT_ERR_MSG & jnp.any(nan_inf_values), 
                  lambda _: jax.debug.print(
                              '{n_nan}/{n_tot} time instants returned a NaN/Inf '
-                             'solution and/or residual for run {run_id}',
+                             'solution for run {run_id}  (n. beta < 0: {N_beta_neg}/{N_beta})',
                              n_nan=jnp.count_nonzero(nan_inf_values),
                              n_tot=nan_inf_values.size,
-                             run_id=run_id),
+                             run_id=run_id,
+                             N_beta_neg=N_beta_neg,
+                             N_beta=beta_check.size),
                  lambda _: None,
                  operand=PRINT_ERR_MSG
                  )
@@ -82,7 +92,7 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
 
 def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior, 
              N_sampling_prior, N_sampling_post, SEED, sigma2_obs, N_WORKERS, RUN_PARALLEL,
-             optimiser_opts, CHECK=False, VIDEO=False, beta_exact=None, BATCH=False,
+             optimiser_opts, CHECK=False, VIDEO=False, exact_sol=None, BATCH=False,
              IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True, hessian='full',
              input_file=None):
     
@@ -339,12 +349,6 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
     
     aux.save_sampling(out_file, 'MAP', comprex_opts, FIML.MAP)
     
-    if CHECK and beta_exact is not None:
-        post.compare_exact_beta(FIML.MAP.beta, beta_exact['beta'], 
-                                x_mesh, t_mesh, beta_exact['x'], beta_exact['t'], 
-                                t_plot=beta_exact['t'][-1], fig_file=out_dir/'checkBeta', 
-                                PLOT=PLOT, VIDEO=VIDEO)
-    
     if PLOT:
         post.plot_convergence_history(opt, fig_file=out_dir/'optimiserHistory')
     
@@ -422,6 +426,12 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
     post.compare_prior_posterior(FIML.prior, FIML.posterior, exp_data, 
                                  N_sigma=2, t_plot=exp_data.t[IDX_TIME_PLOT], 
                                  fig_file=out_dir/'priorVSposterior', PLOT=PLOT)
+    
+    # see how beta correction has improved from prior to posterior
+    if CHECK and exact_sol is not None:
+        post.compare_exact_beta((FIML.prior, FIML.MAP, FIML.posterior), exact_sol, 
+                                t_plot=exact_sol.t[-1], fig_file=out_dir/'checkBeta', 
+                                PLOT=PLOT, VIDEO=VIDEO, beta_labels=('Prior', 'Posterior', 'MAP'))
     
     
     #%% CLOSE HDF5 FILE

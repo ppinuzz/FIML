@@ -123,7 +123,7 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
     #%% REPACK DATA
     
     if ANALYSIS:
-        problem, beta_exact, exp_data = fiml.auxiliaries.read_input_data(
+        problem, exp_data, exact_sol = fiml.auxiliaries.read_input_data(
                                             input_data, sol_file, probes_file, 
                                             solve_Burgers)
         
@@ -152,7 +152,7 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
         return fiml.main.analysis(exp_data, problem, out_dir, beta_opts,
                                   sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,
                                   N_WORKERS, RUN_PARALLEL, optimiser_opts, CHECK, VIDEO,
-                                  beta_exact, BATCH, IDX_TIME_PLOT=-1, hessian=hessian_model,
+                                  exact_sol, BATCH, IDX_TIME_PLOT=-1, hessian=hessian_model,
                                   input_file=run_input_file)
 
 if __name__ == '__main__':

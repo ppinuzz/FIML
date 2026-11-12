@@ -405,9 +405,13 @@ def read_input_data(input_obj, num_solution_obj, exp_data_obj, solver):
     
     print(f'Reading data file \n\t{exp_data_obj.resolve()}')
     with h5py.File(exp_data_obj, 'r') as file:
-        exp_data = objs.ExperimentalData(x=jnp.asarray(file['probes']['x']),
-                                            t=jnp.asarray(file['probes']['t']),
-                                            solution=jnp.asarray(file['exact']['solution']))
+        # obj       h5py.Dataset object, vanishes once file is closed
+        # obj[:]    numpy.ndarray, read the entire array, breaks if the
+        #           data stored in dataset[key] is a scalar 
+        # obj[()]   numpy.ndarray or scalar, read whatever's in the database
+        exp_data = objs.ExperimentalData(x=file['probes']['x'][:],
+                                         t=file['probes']['t'][:],
+                                         solution=file['exact']['solution'][:])
     with h5py.File(num_solution_obj, 'r') as file:
         BC = {'u0': jnp.asarray(file['settings']['u0']), 
               'uL': jnp.asarray(file['settings']['uL']), 
@@ -415,19 +419,19 @@ def read_input_data(input_obj, num_solution_obj, exp_data_obj, solver):
               'u_IC': cloudpickle.loads(jnp.asarray(file['settings']['u_IC']))
               }
         nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
-        if 'beta' in file.keys():
-            beta_exact = {'x': jnp.asarray(file['mesh']['x']),
-                          't': jnp.asarray(file['mesh']['t']),
-                          'beta': jnp.asarray(file['beta']['beta'])
-                          }
-        else:
-            beta_exact = None
+        
+        beta = file['beta']['beta'][:] if 'beta' in file.keys() else None
+        exact_sol = objs.ExactSolution(x=file['mesh']['x'][:],
+                                       t=file['mesh']['t'][:],
+                                       solution=file['exact']['solution'][:],
+                                       beta=beta)
+
     problem = objs.Problem(mesh=generate_mesh(input_data), BC=BC, nu=nu, 
                               solver_fun=solver, STEADY=input_data['steady'])
     
     print_initial_message(input_data)
     
-    return problem, beta_exact, exp_data
+    return problem, exp_data, exact_sol
 
 
 def print_initial_message(input_data):

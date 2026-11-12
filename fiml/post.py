@@ -14,6 +14,7 @@ import fiml.beta as betamod
 from prettytable import PrettyTable
 
 
+
 def check_experiments_in_sigma_band(sol, exp, ax_sol=2, N_sigma=2, t_plot=None, 
                                     fig_file=None, PLOT=True, VIDEO=False):
     # HACK: assicurati nel solver the la dimensione sia (Nt, Nx, N_sample),
@@ -76,7 +77,7 @@ def check_experiments_in_sigma_band(sol, exp, ax_sol=2, N_sigma=2, t_plot=None,
     err_report.title = f'Mean of the distribution vs Experimental data at t = {t_exp_plot:.5f} s'
     err_report.field_names = ['x', 'Mean', 'Experiment', 'Difference', 'Relative error [%]']
     for k in range(exp.solution.shape[1]):
-        err_report.add_row([f'{sol.x[k]:.5f}', f'{u_mean_probes[k]:.5f}',
+        err_report.add_row([f'{exp.x[k]:.5f}', f'{u_mean_probes[k]:.5f}',
                             f'{exp.solution[idx_plot_exp,k]:.5f}', f'{delta_u[k]:.5f}', 
                             f'{100*err[k]:.2f}'])
     aux.check_msg(err_report.get_string())
@@ -102,17 +103,11 @@ def check_experiments_in_sigma_band(sol, exp, ax_sol=2, N_sigma=2, t_plot=None,
             aux.save_fig(fig, fig_file.name, fig_file.parent)
 
 
-def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta, 
-                       t_plot=None, fig_file=None, PLOT=True, VIDEO=False,
-                       beta_labels=('', )):
+def compare_exact_beta(sol_objs, exact_sol, t_plot=None, fig_file=None, 
+                       PLOT=True, VIDEO=False, beta_labels=('', )):
     
-    beta_exact = jnp.asarray(beta_exact)
-    x = jnp.asarray(x)
-    t = jnp.asarray(t)
-    x_beta = jnp.asarray(x_beta)
-    t_beta = jnp.asarray(t_beta)
     STEADY = False
-    if t.size == 1:
+    if exact_sol.t.size == 1:
         aux.warning('Time mesh contains only one time instant, treating the '
                     'problem as steady...')
         STEADY = True
@@ -122,40 +117,35 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
         if t_plot is None:
             idx_plot_beta = -1
             aux.warning('No time instant given, the last instant '
-                        f't = {t_beta[idx_plot_beta]} s will be plotted...')
+                        f't = {exact_sol.t[idx_plot_beta]} s will be plotted...')
         else:
-            if t_plot < t_beta[0] or t_plot > t_beta[-1]:
+            if t_plot < exact_sol.t[0] or t_plot > exact_sol.t[-1]:
                 raise ValueError('Given time instant lies outside of the time range '
                                  'of the reference exact beta: \n'
                                  f'Given time: {t_plot} s\n'
-                                 f'Experimental range: {t_beta[0]}-{t_beta[-1]} s')
+                                 f'Experimental range: {exact_sol.t[0]}-{exact_sol.t[-1]} s')
             # find exact_beta point closest to the given time instant
-            idx_plot_beta = jnp.argmin(jnp.abs(t_beta - t_plot))
+            idx_plot_beta = jnp.argmin(jnp.abs(exact_sol.t - t_plot))
     else:
         # there's only one time instant: the last one
         idx_plot_beta = -1
-    t_beta_plot = t_beta[idx_plot_beta]
-    
-    # make sure beta is ordered like the solution (Nt, Nx)
-    if beta_exact.shape == (x_beta.size, t_beta.size):
-        beta_exact = beta_exact.T
+    t_beta_plot = exact_sol.t[idx_plot_beta]
     
     # beta_num can either be
     #   - a single array, to check a single beta vs the exact one
     #   - a tuple of arrays (e.g. prior, posterior and MAP)
-    if not isinstance(beta_num, tuple):
-        beta_num = (beta_num, )
-    beta_num = tuple([jnp.asarray(beta_i) for beta_i in beta_num])
+    if not isinstance(sol_objs, tuple):
+        sol_objs = (sol_objs, )
 
     if not isinstance(beta_labels, tuple):
         beta_labels = tuple(beta_labels)
-    if len(beta_labels) != len(beta_num):
+    if len(beta_labels) != len(sol_objs):
         raise ValueError('If labels are provided, each beta object must have a label!')
     
     # create figure out of the loop, then update it
     if PLOT:
         fig_beta, ax_beta = plt.subplots()
-        ax_beta.plot(x_beta, beta_exact[idx_plot_beta,:], 'k--', label=r'Exact $\beta$')
+        ax_beta.plot(exact_sol.x, exact_sol.beta[:,idx_plot_beta], 'k', label=r'Exact $\beta$')
         ax_beta.set_xlabel(r'$x$ [-]')
         ax_beta.set_ylabel(r'$\beta$ [-]')
         ax_beta.autoscale(enable=True, axis='x', tight=True)
@@ -165,27 +155,41 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
         fig_err, ax_err = plt.subplots()
         ax_err.axhline(0, color='k', linestyle='--')
         ax_err.set_xlabel(r'$x$ [-]')
-        ax_err.set_ylabel(r'$(\beta - \beta_\mathrm{ex})/\beta_\mathrm{ex}$ [\%]')
+        ax_err.set_ylabel(r'$(\phi- \phi_\mathrm{ex})/\phi_\mathrm{ex}$ [\%]')
         ax_err.autoscale(enable=True, axis='x', tight=True)
-        ax_err.set_title(fr'Error on $\beta$ {time_str}')
+        ax_err.set_title(fr'Errors (solid: $\beta$, dashed: $u$) {time_str}')
+        ax_sol = ax_err.twinx()
+        ax_sol.set_ylabel(r'$(u - u_\mathrm{ex})/u_\mathrm{ex}$ [\%]')
+        ax_sol.tick_params(axis='y')
     
-    for i, beta_i in enumerate(beta_num):
-        # beta originally is transposed because of how it's formulated as a matrix
-        # product (i.e. Nx x Nt, not Nt x Nx like the solution matrix)
-        if beta_i.ndim == 3:
-            # (average as beta_num is a 2D space-time field for each sample => 3D array)
-            beta_i_mean = jnp.mean(beta_i, axis=2)
+    min_err = jnp.inf
+    max_err = -jnp.inf
+    for i, sol_i in enumerate(sol_objs):
+        # if a population of beta, result of the sampling, is passed (and thus
+        # you have 3 dimensions: (Nx, Nt, N_samples)), average the beta's
+        if sol_i.beta.ndim == 3:
+            beta_i_mean = jnp.mean(sol_i.beta, axis=2)
+            sol_i_mean = jnp.mean(sol_i.solution, axis=2)
         else:
-            beta_i_mean = beta_i
-        if beta_i_mean.shape == (x.size, t.size):
-            beta_i_mean = beta_i_mean.T
+            beta_i_mean = sol_i.beta
+            sol_i_mean = sol_i.solution
     
         # numerical beta (from solver) reinterpolated over the space-time grid
         # of the exact beta (to avoid distorting the exact beta)
-        beta_xt = aux.sample_solution(beta_i_mean, x_mesh=x, x_probes=x_beta, 
-                                      t_mesh=t, t_probes=t_beta)
+        # (pass the transpose because the function assumes shape (Nt, Nx))
+        beta_xt = aux.sample_solution(beta_i_mean.T, x_mesh=sol_i.x, x_probes=exact_sol.x, 
+                                      t_mesh=sol_i.t, t_probes=exact_sol.t)
+        beta_xt = beta_xt.T
         
-        err_beta = (beta_xt - beta_exact) / beta_exact
+        sol_xt = aux.sample_solution(sol_i_mean, x_mesh=sol_i.x, x_probes=exact_sol.x,
+                                     t_mesh=sol_i.t, t_probes=exact_sol.t)
+        
+        err_beta = (beta_xt - exact_sol.beta) / exact_sol.beta
+        err_sol = (sol_xt - exact_sol.solution) / exact_sol.solution
+        tmp_min = jnp.min(jnp.concatenate((jnp.ravel(err_beta), jnp.ravel(err_sol))))
+        min_err = tmp_min if tmp_min < min_err else min_err
+        tmp_max = jnp.max(jnp.concatenate((jnp.ravel(err_beta), jnp.ravel(err_sol))))
+        max_err = tmp_max if tmp_max > max_err else max_err
         # average of the relative errors, in modulus
         MAE_err_t = jnp.mean(jnp.abs(err_beta[idx_plot_beta]))
         aux.check_msg(f'Beta object: {beta_labels[i]}\n'
@@ -195,32 +199,36 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
                       f'\tMinimum error: {100*jnp.min(err_beta[idx_plot_beta]):.2f}%')
     
         if PLOT:
-            line, = ax_beta.plot(x_beta, beta_xt[idx_plot_beta,:], 
+            line, = ax_beta.plot(exact_sol.x, beta_xt[:,idx_plot_beta], 
                                  label=rf'{beta_labels[i]} $\beta$')
-            line, = ax_err.plot(x_beta, 100*err_beta[idx_plot_beta,:],
-                                label=rf'{beta_labels[i]}')
+            line, = ax_err.plot(exact_sol.x, 100*err_beta[:,idx_plot_beta],
+                                label=rf'{beta_labels[i]}', linestyle='-')
+            # reuse previous line colour
+            line, = ax_sol.plot(exact_sol.x, 100*err_sol[idx_plot_beta,:],
+                                label=rf'{beta_labels[i]}', linestyle='--',
+                                color=line.get_color())
             
         if VIDEO:
             fig, ax = plt.subplots()
-            line_num, = ax.plot(x_beta, jnp.zeros_like(x_beta), label=r'Calculated $\beta$')
-            line_exact, = ax.plot(x_beta, jnp.zeros_like(x_beta), label=r'Exact $\beta$')
+            line_num, = ax.plot(exact_sol.x, jnp.zeros_like(exact_sol.x), label=r'Calculated $\beta$')
+            line_exact, = ax.plot(exact_sol.x, jnp.zeros_like(exact_sol.x), label=r'Exact $\beta$')
             ax.legend(loc='upper right')
-            ax.set_xlim(x[0], x[-1])
+            ax.set_xlim(sol_i.x[0], sol_i.x[-1])
             ax.set_ylim(0, 2)
             # enable interactive mode
             plt.ion()
             plt.show(block=False)
-            for j in range(t_beta.shape[0]):
+            for j in range(sol_i.t.shape[0]):
                 # stop animation if the user closed the window
                 if not plt.fignum_exists(fig.number):
                     break
-                line_num.set_ydata(beta_xt[j,:])
-                line_exact.set_ydata(beta_exact[j,:])
+                line_num.set_ydata(beta_xt[:,j])
+                line_exact.set_ydata(exact_sol.beta[:,j])
                 fig.canvas.draw_idle()
                 #fig.canvas.flush_events()
                 #plt.pause(0.0000001)
                 plt.pause(0.01)
-                ax.set_title(f'$t = {t_beta[j]:.4f}$ s')
+                ax.set_title(f'$t = {exact_sol.t[j]:.4f}$ s')
             plt.ioff()
             # show figure only if it hasn't been closed by the user
             if plt.fignum_exists(fig.number):
@@ -234,6 +242,9 @@ def compare_exact_beta(beta_num, beta_exact, x, t, x_beta, t_beta,
             
             aux.save_fig(fig_beta, f'{fig_file.name}{beta_name}', fig_file.parent)
         
+        # set same limits to have comparable error plots
+        ax_err.set_ylim((100*min_err, 100*max_err))
+        ax_sol.set_ylim((100*min_err, 100*max_err))
         fig_err.show()
         if fig_file is not None:
             aux.save_fig(fig_err, f'{fig_file.name}{beta_name}_error', fig_file.parent)
@@ -345,7 +356,7 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
             # softplus models:
             #   beta = beta_min + (1-beta_min)*softplus(z)/ln(2)
             # shape: (Nx, Nt)
-            z_exact = betamod._invert_softplus(beta_exact, opts['beta_min'])
+            z_exact = betamod._invert_softplus(beta_exact, opts['beta_min'], opts['beta_ref'])
         case 'BxBt_exp':
             # exp models:
             #   beta = e^z
@@ -523,7 +534,7 @@ def check_exact_beta_PDE(theta_ex, beta_fun, run_solver, sol_exact, x_mesh, t_me
         # the y-axis
         # aspect='auto' stretches the pixels, making them non-square => not
         # relevant here, since the 2 dimensions are not compatible (time-space)
-        im = ax.imshow(jnp.abs(delta), cmap='hot', extent=[t[0], t[-1], x[0], x[-1]],
+        im = ax.imshow(jnp.abs(delta), cmap='hot', extent=[x[0], x[-1], t[0], t[-1]],
                        origin='upper', aspect='auto')
         ax.set_xlabel('$t$ [-]')
         ax.set_ylabel('$x$ [-]')

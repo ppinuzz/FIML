@@ -11,6 +11,7 @@ import jax
 jax.config.update('jax_enable_x64', True)
 import jax.numpy as jnp
 import fiml.fiml as fiml
+import fiml.auxiliaries as aux
 
 
 @dataclass
@@ -92,9 +93,8 @@ class Problem:
         return (beta_fun, self.nu, self.x_mesh, self.t_mesh,
                 self.u_IC, self.u0, self.uL, self.STEADY)
 
-
 @dataclass
-class ExperimentalData:
+class _Solution:
     x: jax.Array
     t: jax.Array
     solution: jax.Array
@@ -102,11 +102,28 @@ class ExperimentalData:
     
     # not needed "per se", but makes sure that they're all JAX arrays
     def __post_init__(self):
-        self.x = jnp.asarray(self.x)
-        self.t = jnp.asarray(self.t)
+        # make sure they have shape (N, ), not (N, 1) or (1, N)
+        self.x = jnp.ravel(self.x)
+        self.t = jnp.ravel(self.t)
         self.solution = jnp.asarray(self.solution)
         if self.beta is not None:
             self.beta = jnp.asarray(self.beta)
+            if self.beta.shape != (self.x.size, self.t.size):
+                aux.warning('Wrong beta ordering: it should be (Nx, Nt), '
+                                  'i.e. the transpose of the solution array (Nt, Nx)\n'
+                                  'Reordering beta...')
+                self.beta = self.beta.T
+        
+
+# both will have the same attributes, inherited from the other dataclass
+@dataclass
+class ExperimentalData(_Solution):
+    pass
+
+
+@dataclass
+class ExactSolution(_Solution):
+    pass
 
 
 @dataclass
