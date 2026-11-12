@@ -44,7 +44,7 @@ class Problem:
     def __post_init__(self, mesh):
         # SPACE MESH
         # HACK: assuming uniform spacing in time and space
-        self.x_mesh = jnp.asarray(mesh['x'])
+        self.x_mesh = jnp.ravel(mesh['x'])
         # shape is (Nx, ) or, at most, (Nx, 1) => size (total number of elements)
         # is Nx either way
         self.Nx = self.x_mesh.size
@@ -54,7 +54,7 @@ class Problem:
         self.dx = dx[0]
         
         # TIME MESH
-        self.t_mesh = jnp.asarray(mesh['t'])
+        self.t_mesh = jnp.ravel(mesh['t'])
         self.Nt = self.t_mesh.size
         if self.STEADY is None:
             # to have a more general solver, steady problems still have a time mesh
