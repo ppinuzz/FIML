@@ -20,8 +20,8 @@ just_fix_windows_console()
 from prettytable import PrettyTable
 import cloudpickle
 import yaml
-
-import fiml.objects as objects
+import fiml.objects as objs
+from types import SimpleNamespace
 
 
 def warning(message):
@@ -405,7 +405,7 @@ def read_input_data(input_obj, num_solution_obj, exp_data_obj, solver):
     
     print(f'Reading data file \n\t{exp_data_obj.resolve()}')
     with h5py.File(exp_data_obj, 'r') as file:
-        exp_data = objects.ExperimentalData(x=jnp.asarray(file['probes']['x']),
+        exp_data = objs.ExperimentalData(x=jnp.asarray(file['probes']['x']),
                                             t=jnp.asarray(file['probes']['t']),
                                             solution=jnp.asarray(file['exact']['solution']))
     with h5py.File(num_solution_obj, 'r') as file:
@@ -422,10 +422,27 @@ def read_input_data(input_obj, num_solution_obj, exp_data_obj, solver):
                           }
         else:
             beta_exact = None
-    problem = objects.Problem(mesh=generate_mesh(input_data), BC=BC, nu=nu, 
+    problem = objs.Problem(mesh=generate_mesh(input_data), BC=BC, nu=nu, 
                               solver_fun=solver, STEADY=input_data['steady'])
     
+    print_initial_message(input_data)
+    
     return problem, beta_exact, exp_data
+
+
+def print_initial_message(input_data):
+    print(f'INPUT DATA: ')
+    _print_dict(input_data)
+
+
+def _print_dict(input_dict, prefix=''):
+    for key in input_dict:
+        if isinstance(input_dict[key], dict):
+            print(f'{key}:')
+            _print_dict(input_dict[key], prefix='\t')
+        else:
+            # print reserving 20 characters (whitespace-filled, it not all used)
+            print(f'{prefix}{key:<20}: {input_dict[key]}')
 
 
 def _read_file_or_obj(input_obj, msg=''):
