@@ -37,7 +37,7 @@ def read_beta_options(opts):
             beta_opts['N_basis_t'] = int(opts['num_basis_functions_t'])
         case 'RBF_Gauss_x' | 'RBF_Gauss_u' | 'RBF_Gauss_x_softplus' | 'RBF_Gauss_u_softplus':
             beta_opts['num_RBF'] = int(opts['num_RBF'])
-        case 'RBF_Gauss_x_poly':
+        case 'RBF_Gauss_x_poly' | 'RBF_Gauss_x_poly_softplus':
             beta_opts['num_RBF'] = int(opts['num_RBF'])
             beta_opts['poly_deg'] = jnp.asarray(opts['poly_degrees_bases'])
         case 'RBF_Gauss_uu':
@@ -74,8 +74,6 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             N_params = B_x.shape[0] * B_t.shape[0]
             params['B_x'] = B_x
             params['B_t'] = B_t
-            aux.warning(f'Bx condition number: {jnp.linalg.cond(B_x):.5e}')
-            aux.warning(f'Bt condition number: {jnp.linalg.cond(B_t):.5e}')
         case 'RBF_Gauss_x' | 'RBF_Gauss_x_softplus':
             print('Calculating Gaussian radial basis functions matrix Phi(x)...')
             x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['num_RBF'])
@@ -84,12 +82,11 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
                            in_axes=0, out_axes=1)(x_c)
             N_params = opts['num_RBF']
             params['Phi'] = Phi
-            cond_num_Phi = jnp.linalg.cond(Phi)
         case 'RBF_Gauss_u' | 'RBF_Gauss_u_softplus':
             x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['num_RBF'])
             N_params = opts['num_RBF']
             params['x_c'] = x_c
-        case 'RBF_Gauss_x_poly':
+        case 'RBF_Gauss_x_poly' | 'RBF_Gauss_x_poly_softplus':
             print('Calculating Gaussian radial basis functions matrix Phi(x)...')
             x_c = jnp.linspace(x_mesh[0], x_mesh[-1], opts['num_RBF'])
             # j-th column is the vector of values of phi_j(x)
@@ -105,7 +102,6 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             Phi = jnp.column_stack((Phi_RBF, P))
             params['Phi'] = Phi
             N_params = Phi.shape[1]
-            cond_num_Phi = jnp.linalg.cond(Phi)
         case 'RBF_Gauss_uu':
              u_lims = opts['u_limits']
              u_c = jnp.linspace(u_lims[0], u_lims[1], opts['num_RBF'])
@@ -115,7 +111,18 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             raise ValueError(f"Unknown beta model '{opts['model']}'")
     print(f'Number of theta parameters to identify: {N_params}')
     params['N_params'] = N_params
-    if cond_num_Phi is not None:
+    
+    # condition number can be calculated once and for all only if Phi depends
+    # solely on x
+    if opts['model'] in {'BxBt', 'BxBt_softplus', 'BxBt_exp', 'RBF_Gauss_x', 
+                         'RBF_Gauss_x_softplus', 'RBF_Gauss_x_poly', 
+                         'RBF_Gauss_x_poly_softplus'}:
+        # with big matrices (e.g. 100.000 x 11), jnp.linalg.cond() calculates
+        # the full SVD => not enough memory => calculate it using the definition
+        #   compute_uv=False        returns only the singular values
+        #   full_matrices=Fals      since U and V^H are not needed, don't compute them fully
+        sing_values = jnp.linalg.svd(Phi, full_matrices=False, compute_uv=False)
+        cond_num_Phi = sing_values.max() / sing_values.min()
         aux.warning(f'Phi condition number: {cond_num_Phi:.5e}')
     
     # wrap each beta function
@@ -137,7 +144,7 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             beta = lambda theta, u=None, x=None, t=None: _beta_RBF_Gauss_u(
                         theta, x_c, x_mesh, u, opts['beta_ref'], opts['shape_factor'])
             DEPENDS_ON_U = True
-        case 'RBF_Gauss_x_softplus':
+        case 'RBF_Gauss_x_softplus' | 'RBF_Gauss_x_poly_softplus':
             beta = lambda theta, u=None, x=None, t=None: _beta_RBF_Gauss_x_softplus(
                         theta, Phi, t_mesh.size, opts['beta_ref'], opts['beta_min'])
         case 'RBF_Gauss_u_softplus':
@@ -145,12 +152,6 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
                         theta, x_c, x_mesh, u, opts['beta_ref'], 
                         opts['shape_factor'], opts['beta_min'])
             DEPENDS_ON_U = True
-        case 'RBF_Gauss_x_poly':
-            # if the full matrix [Phi_RBF, P] and the full parameter vector
-            # [theta, eta] are passed, the shape of the phi(x) is not relevant
-            # => use a single function call
-            beta = lambda theta, u=None, x=None, t=None: _beta_RBF_Gauss_x(
-                        theta, Phi, t_mesh.size, opts['beta_ref'])
         case 'RBF_Gauss_uu':
             DEPENDS_ON_U = True
             beta = lambda theta, u=None, x=None, t=None: _beta_RBF_Gauss_uu(
@@ -222,7 +223,6 @@ def _RBF_Gauss_u_Phi(x, x_c, u, K):
     # u_c.T: (N_RBF, Nt) => (1, N_RBF, Nt) to have same ordering as Phi
     # add the missing axis, with size 1, as jnp.newaxis
     Phi = jnp.exp(-K * (u.T[:,jnp.newaxis,:] - u_c.T[jnp.newaxis,:,:])**2)
-    aux.warning(f'Phi condition number: {jnp.linalg.cond(Phi):.5e}')
     return Phi
 
 def _RBF_Gauss_uu_Phi(u, u_c, K):
@@ -235,7 +235,6 @@ def _RBF_Gauss_uu_Phi(u, u_c, K):
     # u_c: (N_RBF,) => (1, N_RBF, 1) to have same ordering as Phi
     # add the missing axis, with size 1, as jnp.newaxis
     Phi = jnp.exp(-K * (u.T[:,jnp.newaxis,:] - u_c[jnp.newaxis,:,jnp.newaxis])**2)
-    aux.warning(f'Phi condition number: {jnp.linalg.cond(Phi):.5e}')
     return Phi
 
 def _beta_RBF_Gauss_x_softplus(theta_r, Phi, N_t, beta_ref, beta_min):

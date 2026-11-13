@@ -326,9 +326,9 @@ def compare_prior_posterior(prior, post, exp, ax_sol=2, N_sigma=2, t_plot=None,
             aux.save_fig(fig, fig_file.name, fig_file.parent)
 
 
-def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_file=None):
+def check_parametrisation_fitness(sol_exact, opts, PLOT=True, fig_file=None):
     
-    if sol_exact['t'].size == 1:
+    if sol_exact.t.size == 1:
         STEADY = True
         idx_time = -1
     else:
@@ -336,35 +336,29 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
         aux.warning('Unsteady data, but not time instant provided: will plot the last one...')
         idx_time = -1
     # signature: beta(theta, u=None, x=None, t=None)
-    beta_fun, beta_params = betamod.parametrise_beta(opts, sol_exact['x'], 
-                                                     sol_exact['t'], STEADY)
+    beta_fun, beta_params = betamod.parametrise_beta(opts, sol_exact.x, 
+                                                     sol_exact.t, STEADY)
     
     # check beta ordering: it should be (Nt, Nx)^T, i.e. (Nx, Nt)
-    Nx = sol_exact['x'].size
-    Nt = sol_exact['t'].size
-    beta_shape_ref = (Nx, Nt)
-    if beta_exact.shape != beta_shape_ref:
-        beta_exact = beta_exact.T
-        if beta_exact.shape != beta_shape_ref:
-            raise ValueError(f'Shape mismatch: beta should have shape {beta_shape_ref}, '
-                             f'but it has shape {beta_exact.shape}')
+    Nx = sol_exact.x.size
+    Nt = sol_exact.t.size
     
     # z here is always obtained using a matrix-vector product, and therefore
     # has a LINEAR relationship
     match opts['model']:
-        case 'BxBt_softplus' | 'RBF_Gauss_x_softplus' | 'RBF_Gauss_u_softplus':
+        case 'BxBt_softplus' | 'RBF_Gauss_x_softplus' | 'RBF_Gauss_u_softplus' | 'RBF_Gauss_x_poly_softplus':
             # softplus models:
             #   beta = beta_min + (1-beta_min)*softplus(z)/ln(2)
             # shape: (Nx, Nt)
-            z_exact = betamod._invert_softplus(beta_exact, opts['beta_min'], opts['beta_ref'])
+            z_exact = betamod._invert_softplus(sol_exact.beta, opts['beta_min'], opts['beta_ref'])
         case 'BxBt_exp':
             # exp models:
             #   beta = e^z
             # shape: (Nx, Nt)
-            z_exact = jnp.log(beta_exact)
+            z_exact = jnp.log(sol_exact.beta)
         case 'BxBt' | 'RBF_Gauss_x' | 'RBF_Gauss_u' | 'RBF_Gauss_x_poly' | 'RBF_Gauss_uu':
             # shape: (Nx, Nt)
-            z_exact = beta_exact - opts['beta_ref']
+            z_exact = sol_exact.beta - opts['beta_ref']
         case _:
             raise ValueError(f"Unknown beta model '{opts['model']}'")
     
@@ -393,7 +387,7 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
             # Theta is a column vector of row vector => unravel in row-major
             # order (C-style)
             theta = jnp.ravel(Theta, order='C')
-        case 'RBF_Gauss_x' | 'RBF_Gauss_x_softplus' | 'RBF_Gauss_x_poly':
+        case 'RBF_Gauss_x' | 'RBF_Gauss_x_softplus' | 'RBF_Gauss_x_poly' | 'RBF_Gauss_x_poly_softplus':
             if not STEADY:
                 raise ValueError('RBF_Gauss_x and RBF_Gauss_x_softplus are only '
                                  'meant for STEADY problems!')
@@ -407,12 +401,12 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
             # shape: (Nx, N_RBF, N_t)
             N_RBF = beta_params['N_params']
             if opts['model'] == 'RBF_Gauss_uu':
-                Phi = betamod._RBF_Gauss_uu_Phi(sol_exact['solution'], 
+                Phi = betamod._RBF_Gauss_uu_Phi(sol_exact.solution, 
                                                 beta_params['u_c'], 
                                                 opts['shape_factor'])
             else:
-                Phi = betamod._RBF_Gauss_u_Phi(sol_exact['x'], beta_params['x_c'], 
-                                               sol_exact['solution'], 
+                Phi = betamod._RBF_Gauss_u_Phi(sol_exact.x, beta_params['x_c'], 
+                                               sol_exact.solution, 
                                                opts['shape_factor'])
             # at each time instant, the N_RBF equations holds:
             #   Phi[:,:,k] * theta = z[:,k]
@@ -433,16 +427,14 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
         case _:
             raise ValueError(f"Unknown beta model '{opts['model']}'")
 
-    beta_fit = beta_fun(theta, u=sol_exact['solution'], x=sol_exact['x'], t=sol_exact['t'])
+    beta_fit = beta_fun(theta, u=sol_exact.solution, x=sol_exact.x, t=sol_exact.t)
 
-    if beta_fit.shape != beta_shape_ref:
-        raise ValueError('Shape error: beta fitted to the exact data should '
-                         f'have shape {beta_shape_ref}, not {beta_fit.shape}')
-    err_beta = beta_fit - beta_exact
+    err_beta = beta_fit - sol_exact.beta
+    err_rel = err_beta / sol_exact.beta
     # global relative L2 error
-    err_rel_L2 = jnp.linalg.norm(err_beta) / jnp.linalg.norm(beta_exact)
+    err_rel_L2 = jnp.linalg.norm(err_beta) / jnp.linalg.norm(sol_exact.beta)
     # pointwise relative error
-    rel_err_beta = err_beta / beta_exact
+    rel_err_beta = err_beta / sol_exact.beta
     # average absolute pointwise relative error
     avg_rel_err = jnp.mean(jnp.abs(rel_err_beta))
 
@@ -455,7 +447,7 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
     
     if STEADY:
         theta_report = PrettyTable()
-        time_str = f"at t = {sol_exact['t'][idx_time]} s" if not STEADY else ''
+        time_str = f"at t = {sol_exact.t[idx_time]} s" if not STEADY else ''
         theta_report.title = f'Theta coefficients {time_str}'
         theta_report.field_names = ['Index', 'Value']
         for i, theta_i in enumerate(theta):
@@ -464,8 +456,8 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
     
     if PLOT:
         fig = plt.figure()
-        plt.plot(sol_exact['x'], beta_exact[:,idx_time], label='Exact')
-        plt.plot(sol_exact['x'], beta_fit[:,idx_time], label='Fitted')
+        plt.plot(sol_exact.x, sol_exact.beta[:,idx_time], label='Exact')
+        plt.plot(sol_exact.x, beta_fit[:,idx_time], label='Fitted')
         plt.xlabel('$x$ [-]')
         plt.ylabel(r'$\beta$ [-]')
         plt.autoscale(enable=True, axis='x', tight=True)
@@ -473,6 +465,15 @@ def check_parametrisation_fitness(sol_exact, beta_exact, opts, PLOT=True, fig_fi
         plt.show(block=False)
         if fig_file is not None:
             aux.save_fig(fig, fig_file.name, fig_file.parent)
+        
+        fig_err = plt.figure()
+        plt.plot(sol_exact.x, 100*err_rel[:,idx_time])
+        plt.xlabel('$x$ [-]')
+        plt.ylabel(r'$|(\beta - \beta_\mathrm{ex})/\beta_\mathrm{ex}|$ [\%]')
+        plt.autoscale(enable=True, axis='x', tight=True)
+        plt.show(block=False)
+        if fig_file is not None:
+            aux.save_fig(fig_err, '{fig_file.name}_error', fig_file.parent)
     
     return theta
 
@@ -500,20 +501,20 @@ def plot_convergence_history(opt_obj, fig_file=None):
         aux.save_fig(fig_cost, f'{fig_file.name}_cost', fig_file.parent)
 
 
-def check_exact_beta_PDE(theta_ex, beta_fun, run_solver, sol_exact, x_mesh, t_mesh,
-                         PLOT=True, fig_file=None, t_plot=None):
+def check_exact_beta_PDE(theta_ex, run_solver, sol_exact, problem, PLOT=True, 
+                         fig_file=None, t_plot=None):
     # solve the problem using the "exact" theta obtained by fitting the exact
     # beta using the given parametrisation => if the fitting is good,
     # beta(theta_ex) = beta_ex => the PDE should be the original exact PDE,
     # therefore the solution should be the exact one
-    solution, max_residual, success = run_solver(theta_ex, beta_fun, x_mesh, t_mesh)
+    solution, max_residual, success = run_solver(theta_ex)
     
-    if solution.shape != sol_exact['solution'].shape:
-        exact_sol_resamp = aux.sample_solution(sol_exact['solution'], 
-                                               x_mesh=sol_exact['x'], t_mesh=sol_exact['t'], 
-                                               x_probes=x_mesh, t_probes=t_mesh)
+    if solution.shape != sol_exact.solution.shape:
+        exact_sol_resamp = aux.sample_solution(sol_exact.solution, 
+                                               x_mesh=sol_exact.x, t_mesh=sol_exact.t, 
+                                               x_probes=problem.x_mesh, t_probes=problem.t_mesh)
     else:
-        exact_sol_resamp = sol_exact['solution']
+        exact_sol_resamp = sol_exact.solution
     delta = solution - exact_sol_resamp
     avg_delta = jnp.mean(jnp.abs(delta))
     rel_err = delta / exact_sol_resamp
@@ -525,16 +526,14 @@ def check_exact_beta_PDE(theta_ex, beta_fun, run_solver, sol_exact, x_mesh, t_me
                   f'\n\tAverage absolute difference (at all times)  : {avg_delta:.5e}'
                   f'\n\tL2-norm relative difference                 : {norm_err:.5e}')
     
-    if PLOT:
-        x = sol_exact['x']
-        t = sol_exact['t']
-        
+    if PLOT:        
         fig_delta, ax = plt.subplots()
         # specify the physical extent of the domain and where is the origin of
         # the y-axis
         # aspect='auto' stretches the pixels, making them non-square => not
         # relevant here, since the 2 dimensions are not compatible (time-space)
-        im = ax.imshow(jnp.abs(delta), cmap='hot', extent=[x[0], x[-1], t[0], t[-1]],
+        im = ax.imshow(jnp.abs(delta), cmap='hot', extent=[sol_exact.x[0], sol_exact.x[-1], 
+                                                           sol_exact.t[0], sol_exact.t[-1]],
                        origin='upper', aspect='auto')
         ax.set_xlabel('$t$ [-]')
         ax.set_ylabel('$x$ [-]')
@@ -553,8 +552,8 @@ def check_exact_beta_PDE(theta_ex, beta_fun, run_solver, sol_exact, x_mesh, t_me
             raise NotImplementedError("Still haven't implemented t_plot != None case")
         
         fig_compare = plt.figure()
-        plt.plot(x, sol_exact['solution'][idx_plot_t,:], label='Exact')
-        plt.plot(x_mesh, solution[idx_plot_t,:], label=r'u(x; $\theta = \theta_\mathrm{fit})$')
+        plt.plot(sol_exact.x, sol_exact.solution[idx_plot_t,:], label='Exact')
+        plt.plot(problem.x_mesh, solution[idx_plot_t,:], label=r'u(x; $\theta = \theta_\mathrm{fit})$')
         plt.xlabel('$x$ [-]')
         plt.ylabel('$u$ [-]')
         plt.title(r'Solution at $\theta = \theta_\mathrm{fit}$ vs experiment')
@@ -565,9 +564,9 @@ def check_exact_beta_PDE(theta_ex, beta_fun, run_solver, sol_exact, x_mesh, t_me
         plt.show(block=False)
         
         fig_error = plt.figure()
-        plt.plot(x_mesh, 100*rel_err[idx_plot_t,:])
+        plt.plot(problem.x_mesh, 100*rel_err[idx_plot_t,:])
         plt.xlabel('$x$ [-]')
-        plt.ylabel(r'$|u_\mathrm{ex} - u(\theta_\mathrm{fit})|/u_\mathrm{ex}$ [\%]')
+        plt.ylabel(r'$(u_\mathrm{ex} - u(\theta_\mathrm{fit}))/u_\mathrm{ex}$ [\%]')
         plt.title(r'Relative error')
         plt.autoscale(enable=True, axis='x', tight=True)
         if fig_file is not None:

@@ -109,7 +109,7 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
                 
         FIML_file = Path(output_data['FIML_file'])
         probes_file = Path(output_data['data_file'])
-        beta_exact_file = Path(output_data['exact_solution_file'])
+        exact_sol_file = Path(output_data['exact_solution_file'])
         out_dir = Path(output_data['output_dir'])
 
 
@@ -129,25 +129,18 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
         
 
     if POST_PROC:
-        with h5py.File(beta_exact_file, 'r') as file:
-            if 'beta' in file.keys():
-                beta_exact = {'x': jnp.asarray(file['mesh']['x']),
-                              't': jnp.asarray(file['mesh']['t']),
-                              'beta': jnp.asarray(file['beta']['beta'])
-                              }
-            else:
-                beta_exact = None
-            sol_exact = {'x': jnp.asarray(file['mesh']['x']),
-                         't': jnp.asarray(file['mesh']['t']),
-                          'solution': jnp.asarray(file['exact']['solution'])
-                          }
+        with h5py.File(exact_sol_file, 'r') as file:
+            sol_exact = fiml.objects.ExactSolution(x=file['mesh']['x'][:],
+                                                   t=file['mesh']['t'][:],
+                                                   solution=file['exact']['solution'][:],
+                                                   beta=file['beta']['beta'][:])
             nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
 
     
     #%% LAUNCH CODE
     if POST_PROC:
         return fiml.main.postprocessing(FIML_file, probes_file, out_dir, solve_Burgers, 
-                                        nu, beta_exact=beta_exact, sol_exact=sol_exact)
+                                        nu, sol_exact=sol_exact)
     if ANALYSIS:
         return fiml.main.analysis(exp_data, problem, out_dir, beta_opts,
                                   sigma2_prior, N_sampling_prior, N_sampling_post, SEED, sigma2_obs,

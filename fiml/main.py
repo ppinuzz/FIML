@@ -347,8 +347,6 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
     t_elapsed = perf_counter() - start_time
     print(f'Time required to evaluate cost function jacobian: {t_elapsed:.3e} s')
     
-    aux.save_sampling(out_file, 'MAP', comprex_opts, FIML.MAP)
-    
     if PLOT:
         post.plot_convergence_history(opt, fig_file=out_dir/'optimiserHistory')
     
@@ -362,6 +360,19 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
     fiml.compare_baseline_MAP_solutions(FIML.MAP, jnp.zeros_like(FIML.MAP.theta), solver_wrap, 
                                         exp_data, t=t_mesh, t_exp=exp_data.t,
                                         PLOT=PLOT)
+
+    if CHECK and exact_sol is not None:
+        # check if the parametrisation is able to reproduce the exact beta
+        theta_ex = post.check_parametrisation_fitness(exact_sol, beta_opts,
+                                                      fig_file=out_dir/'checkBetaParam')
+
+        run_solver_fun = lambda theta_ex: run_solver_case(None, theta_ex, 
+                                            problem.solver_fun, 
+                                            *problem.solver_args(beta_fun),
+                                            out_dir=None)[1:]
+        # solve the PDE with the "exact" value of theta => you should get the
+        # exact solution
+        post.check_exact_beta_PDE(theta_ex, run_solver_fun, exact_sol, problem)
 
     
     #%% CALCULATE COVARIANCE OF THE POSTERIOR (HESSIAN)
@@ -395,6 +406,8 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
     # rather than inverting H with inv(H), calculate is solving the linear
     # system H*H_inv = I
     FIML.MAP.covariance = jnp.linalg.solve(FIML.MAP.hessian, jnp.eye(FIML.MAP.theta.size))
+    
+    aux.save_sampling(out_file, 'MAP', comprex_opts, FIML.MAP)
     
     
     #%% EVALUATE A-POSTERIORI DISTRIBUTION
@@ -431,7 +444,7 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
     if CHECK and exact_sol is not None:
         post.compare_exact_beta((FIML.prior, FIML.MAP, FIML.posterior), exact_sol, 
                                 t_plot=exact_sol.t[-1], fig_file=out_dir/'checkBeta', 
-                                PLOT=PLOT, VIDEO=VIDEO, beta_labels=('Prior', 'Posterior', 'MAP'))
+                                PLOT=PLOT, VIDEO=VIDEO, beta_labels=('Prior', 'MAP', 'Posterior'))
     
     
     #%% CLOSE HDF5 FILE
@@ -465,6 +478,12 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
             plt.show(block=True)
         finally:
             timer.stop()
+
+    
+    FIML_class_file = out_filename.parent / 'FIML_object.pkl'
+    print(f'Saving FIML class object to \n\t{FIML_class_file.resolve()}')
+    with open(FIML_class_file, 'wb') as file:
+        cloudpickle.dump(FIML, file)
     
     return FIML
 
@@ -472,84 +491,52 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
 
 #%% POSTPROCESSING
 
-def postprocessing(sol_file, exp_file, out_dir, solver_fun, nu_fun, beta_exact=None, sol_exact=None):
-    sol_file = Path(sol_file)
-    print(f'Reading FIML solution from \n\t{sol_file.resolve()}')
-    # https://stackoverflow.com/a/41586571/17220538
-    with h5py.File(sol_file, 'r') as file:
-        print('Available groups (left) and their datasets (right): ')
-        for group_name, group in file.items():
-            print('\t', group_name, '\t', list(group.keys()))
-        prior_data = aux.load_dataset(file, 'prior')
-        posterior_data = aux.load_dataset(file, 'posterior')
-        MAP_data = aux.load_dataset(file, 'MAP')
-        mesh = aux.load_dataset(file, 'mesh')
-        input_data = aux.load_dataset(file, 'input_data')
-        BC = aux.load_dataset(file, 'boundary_conditions')
+def postprocessing(sol_file, exp_file, out_dir, problem_obj, FIML, sol_exact=None,
+                   input_data=None):
     
-    exp_file = Path(exp_file)
-    print(f'Reading experimental data from \n\t{exp_file.resolve()}')
-    with h5py.File(exp_file, 'r') as file:
-        exp_data = aux.load_dataset(file)
+    prior, posterior, exp, MAP, BC, input_data = aux.pack_post_data(
+                                                    sol_file=sol_file, 
+                                                    exp_file=exp_file)
     
-    if mesh['t'].size == 1:
+    if prior.t.size == 1:
         aux.warning('Only one time instant in the time mesh, assuming steady flow...')
         STEADY = True
+        IDX_TIME_PLOT = -1
     else:
         STEADY = False
     
     # check where experimental data lie within the +/- 2 sigma band around the
     # sample mean value, for both the prior and the posterior
-    check_sigma_opts = {'exp': jnp.asarray(exp_data['solution']),
-                        'x': jnp.asarray(mesh['x']),
-                        't': jnp.asarray(mesh['t']),
-                        'x_exp': jnp.asarray(exp_data['x']),
-                        't_exp': jnp.asarray(exp_data['t']),
-                        'N_sigma': 2,
-                        't_plot': exp_data['t'][-1]
-                        }
+    check_sigma_opts = {'N_sigma': 2, 't_plot': exp.t[-1]}
     # remove failed simulations
     # (use name, to unpack the tuple composed of only 1 element here)
-    prior_valid, = fiml.handle_failed_runs((prior_data['solution']), prior_data['success'])
-    post.check_experiments_in_sigma_band(prior_valid, **check_sigma_opts,
+    post.check_experiments_in_sigma_band(prior, exp, **check_sigma_opts, 
                                          fig_file=out_dir/'meanSigmaExpPrior')
-    posterior_valid, = fiml.handle_failed_runs((posterior_data['solution']), posterior_data['success'])
-    post.check_experiments_in_sigma_band(posterior_valid, **check_sigma_opts,
+
+    post.check_experiments_in_sigma_band(posterior, exp, **check_sigma_opts,
                                          fig_file=out_dir/'meanSigmaExpPosterior')
     
-    # compare prior, posterior and MAP beta correction to the exact one
-    # (if known)
-    if beta_exact is not None:
-        post.compare_exact_beta((prior_data['beta'], posterior_data['beta'], MAP_data['beta']),
-                                beta_exact['beta'], 
-                                mesh['x'], mesh['t'], beta_exact['x'], beta_exact['t'], 
-                                t_plot=beta_exact['t'][-1], fig_file=out_dir/'checkBeta',
-                                beta_labels=('Prior', 'Posterior', 'MAP')
-                                )
-    
-    # check if the parametrisation is able to reproduce the exact beta
-    if beta_exact is not None and sol_exact is not None:
-        beta_opts = betamod.read_beta_options(input_data['beta'])
-        theta_ex = post.check_parametrisation_fitness(sol_exact, beta_exact['beta'], beta_opts,
-                                                      fig_file=out_dir/'checkBetaParam')
-        
-        # calculate function beta = beta(theta, ...)
-        beta_fun, beta_params = betamod.parametrise_beta(beta_opts, mesh['x'], mesh['t'], STEADY)
-        # ignore 1st output (i.e. the run ID)        
-        run_solver_fun = lambda theta_ex, beta_fun, x_mesh, t_mesh: run_solver_case(
-                                    None, theta_ex, solver_fun, beta_fun, nu_fun,
-                                    x_mesh, t_mesh, u_IC=BC['u_IC'], u0=BC['u0'], uL=BC['uL'],
-                                    STEADY=STEADY, out_dir=None)[1:]
-        # solve the PDE with the "exact" value of theta => you should get the
-        # exact solution
-        post.check_exact_beta_PDE(theta_ex, beta_fun, run_solver_fun, sol_exact,
-                                  mesh['x'], mesh['t'])
-    
-    
-    
-    
-    post.compare_prior_posterior(prior_valid, posterior_valid, **check_sigma_opts, 
+    post.compare_prior_posterior(prior, posterior, exp, N_sigma=2, t_plot=exp.t[IDX_TIME_PLOT], 
                                  fig_file=out_dir/'priorVSposterior')
+    
+    
+    if sol_exact is not None:
+        # compare prior, posterior and MAP beta correction to the exact one
+         post.compare_exact_beta((prior, MAP, posterior), sol_exact, 
+                                 t_plot=sol_exact.t[-1], fig_file=out_dir/'checkBeta', 
+                                 beta_labels=('Prior', 'Posterior', 'MAP'))
+         
+         # check if the parametrisation is able to reproduce the exact beta
+         theta_ex = post.check_parametrisation_fitness(sol_exact, FIML.beta_opts,
+                                                       fig_file=out_dir/'checkBetaParam')
+
+         run_solver_fun = lambda theta_ex: run_solver_case(None, theta_ex, 
+                                             problem_obj.solver_fun, 
+                                             *problem_obj.solver_args(FIML.beta_fun),
+                                             out_dir=None)[1:]
+         # solve the PDE with the "exact" value of theta => you should get the
+         # exact solution
+         post.check_exact_beta_PDE(theta_ex, run_solver_fun, sol_exact, problem_obj)
     
     # keep the terminal on hold to avoid closing figures immediately
     aux.warning('Close all figures to terminate the execution')
