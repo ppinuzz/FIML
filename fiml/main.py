@@ -94,7 +94,7 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
              N_sampling_prior, N_sampling_post, SEED, sigma2_obs, N_WORKERS, RUN_PARALLEL,
              optimiser_opts, CHECK=False, VIDEO=False, exact_sol=None, BATCH=False,
              IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True, hessian='full',
-             input_file=None):
+             input_file=None, weight_reg=1):
     
     if BATCH:
         aux.warning('BATCH mode selected, turning off all plot flags...')
@@ -275,7 +275,8 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
                                  h_theta=h_theta, 
                                  C_data=sigma2_obs,
                                  C_theta=sigma2_prior,
-                                 theta_prior=theta_prior
+                                 theta_prior=theta_prior,
+                                 W_reg=weight_reg
                                  )
 
     def cost_and_status(theta):

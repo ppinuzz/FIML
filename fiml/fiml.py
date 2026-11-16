@@ -158,12 +158,11 @@ def compare_baseline_MAP_solutions(MAP, theta_baseline, solver_wrap,
             aux.save_fig(fig.figure, fig_name.stem, fig_name.parent)
 
 
-#@partial(jax.jit, static_argnames=('h_beta', ))
-def cost_function(theta, d, h_theta, Cm, C_theta, theta_prior):
+def cost_function(theta, d, h_theta, Cm, C_theta, theta_prior, weight_reg):
     sol_theta, success = h_theta(theta)
     cost_data = _quadratic_form(d-sol_theta, Cm)
     cost_theta = _quadratic_form(theta-theta_prior, C_theta)
-    J = cost_data + cost_theta
+    J = cost_data + weight_reg*cost_theta
     return J, success
 
 

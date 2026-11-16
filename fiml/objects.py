@@ -205,15 +205,17 @@ class CostFunction:
     C_data: float | jax.Array
     C_theta: float | jax.Array
     theta_prior: jax.Array
+    # weight of the regularisation term in cost = J_fit + W_reg * J_reg
+    W_reg: float
 
     def __post_init__(self):
         self.data = jnp.asarray(self.data)
-
+    
     def __call__(self, theta):
         # cost, success = fiml.cost_function(...)
         return fiml.cost_function(theta, d=self.data, h_theta=self.h_theta,
                                   Cm=self.C_data, C_theta=self.C_theta,
-                                  theta_prior=self.theta_prior)
+                                  theta_prior=self.theta_prior, weight_reg=self.W_reg)
 
 
 @dataclass
