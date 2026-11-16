@@ -90,11 +90,11 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
     return run_id, solution, max_res, success
 
 
-def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior, 
-             N_sampling_prior, N_sampling_post, SEED, sigma2_obs, N_WORKERS, RUN_PARALLEL,
+def analysis(exp_data, problem, out_dir, beta_opts, cost_fun_obj, 
+             N_sampling_prior, N_sampling_post, SEED, N_WORKERS, RUN_PARALLEL,
              optimiser_opts, CHECK=False, VIDEO=False, exact_sol=None, BATCH=False,
              IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True, hessian='full',
-             input_file=None, weight_reg=1):
+             input_file=None):
     
     if BATCH:
         aux.warning('BATCH mode selected, turning off all plot flags...')
@@ -210,16 +210,13 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
     
     #%% DRAW FROM PRIOR DISTRIBUTION
     
-    # check that covariance matrix is finite, symmetryc, positive semi-definite
-    aux.check_covariance_matrix(sigma2_prior)
-    # beta = 1 + sum_mq theta_mq Bm(x) Bq(t)
-    # beta_prior = 1 (no correction) means theta_prior = 0
-    theta_prior = np.zeros(shape=(N_theta, ))
+    # default is theta prior = 0 (i.e. beta_prior = 1, no correction)
+    theta_prior = cost_fun_obj.generate_theta_prior(N_theta)
     key_random = aux.generate_key(SEED)
     # each column of the matrix is one draw of the theta vector, which contains
     # the N_theta parameters of the beta(x,t) function
     print(f'Drawing {N_sampling_prior} samples of the {N_theta}-components theta vector...')
-    theta_prior_samples = fiml.prior_sampling(theta_prior, sigma2_prior, 
+    theta_prior_samples = fiml.prior_sampling(theta_prior, cost_fun_obj.C_theta, 
                                               N_sampling_prior, key_random)
     
 
@@ -266,30 +263,15 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
         # (Fortran-style) 
         sol_vet = jnp.ravel(sol_probes.T)
         return sol_vet, success
-
-    # check that covariance matrix is finite, symmetryc, positive semi-definite
-    aux.check_covariance_matrix(sigma2_obs)
     
-    # pass data (exp_data) as a column vector of column vectors => (...).T
-    FIML.cost = objs.CostFunction(data=jnp.ravel(exp_data.solution.T),
-                                 h_theta=h_theta, 
-                                 C_data=sigma2_obs,
-                                 C_theta=sigma2_prior,
-                                 theta_prior=theta_prior,
-                                 W_reg=weight_reg
-                                 )
-
-    def cost_and_status(theta):
-        cost, success = FIML.cost(theta)
-        return cost, success
-
+    cost_fun_obj.h_theta = h_theta
+    # now that all the methods of the cost function are defined, store the 
+    # object into the FIML object
+    FIML.cost = cost_fun_obj
+    
     @jax.jit
-    def J_cost_fun(theta):
-        # 2nd argument is the success flag, 1st is the numerical cost
-        return cost_and_status(theta)[0]
-    
     def cost_with_aux(theta):
-        cost, success = cost_and_status(theta)
+        cost, success = FIML.cost(theta)
         return cost, (cost, success)
 
     @jax.jit
@@ -300,7 +282,7 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
         grad, (cost, success) = jax.jacfwd(cost_with_aux, has_aux=True)(theta)
         return cost, grad, success
 
-    FIML.jacobian = lambda theta: cost_and_jacobian(theta)[1]
+    FIML.cost.jacobian = lambda theta: cost_and_jacobian(theta)[1]
     
     
     print('Minimising the cost function J(theta) to find maximum-a-posteriori '
@@ -382,18 +364,18 @@ def analysis(exp_data, problem, out_dir, beta_opts, sigma2_prior,
     start_time = perf_counter()
     match hessian.lower():
         case 'full':
-            H_MAP = jax.jacfwd(jax.jacfwd(J_cost_fun))(FIML.MAP.theta)
+            H_MAP = jax.jacfwd(jax.jacfwd(cost_with_aux, has_aux=True), has_aux=True)(FIML.MAP.theta)
         case 'gauss_newton':
             # h_theta returns the solution and the success flag => pass a wrapper
             # function that returns only the solution, to avoid having JAX
             # differentiating w.r.t. the flag
             H_MAP = fiml.Gauss_Newton_hessian(lambda theta: h_theta(theta)[0], 
-                                              FIML.MAP.theta, sigma2_obs, sigma2_prior)
+                                              FIML.MAP.theta, cost_fun_obj.C_data, cost_fun_obj.C_theta)
         case 'test':
             aux.warning('Calculating the Hessian matrix using all available options...')
-            H_MAP_full = jax.jacfwd(jax.jacfwd(J_cost_fun))(FIML.MAP.theta)
+            H_MAP_full = jax.jacfwd(jax.jacfwd(cost_with_aux, has_aux=True), has_aux=True)(FIML.MAP.theta)
             H_MAP_GN = fiml.Gauss_Newton_hessian(lambda theta: h_theta(theta)[0], 
-                                                 FIML.MAP.theta, sigma2_obs, sigma2_prior)
+                                                 FIML.MAP.theta, cost_fun_obj.C_data, cost_fun_obj.C_theta)
             err_GN = jnp.linalg.norm(H_MAP_GN - H_MAP_full) / jnp.linalg.norm(H_MAP_full)
             aux.warning(f'Gauss-Newton vs Exact Frobenius-norm error: {err_GN:.5e}')
             H_MAP = H_MAP_full

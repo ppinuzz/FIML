@@ -400,38 +400,69 @@ def print_theta(theta_MAP, theta_prior, STEADY, t_mesh=None, t=None):
     check_msg(theta_report.get_string())
 
 
-def read_input_data(input_obj, num_solution_obj, exp_data_obj, solver):
+def read_input_data(input_obj=None, num_solution_obj=None, exp_data_obj=None, solver=None, mode='analysis'):
     input_data = _read_file_or_obj(input_obj, msg='input file')
     
-    print(f'Reading data file \n\t{exp_data_obj.resolve()}')
-    with h5py.File(exp_data_obj, 'r') as file:
-        # obj       h5py.Dataset object, vanishes once file is closed
-        # obj[:]    numpy.ndarray, read the entire array, breaks if the
-        #           data stored in dataset[key] is a scalar 
-        # obj[()]   numpy.ndarray or scalar, read whatever's in the database
-        exp_data = objs.ExperimentalData(x=file['probes']['x'][:],
-                                         t=file['probes']['t'][:],
-                                         solution=file['exact']['solution'][:])
-    with h5py.File(num_solution_obj, 'r') as file:
-        BC = {'u0': jnp.asarray(file['settings']['u0']), 
-              'uL': jnp.asarray(file['settings']['uL']), 
-              # HDF5 dataset object -> NumPy array -> lambda function
-              'u_IC': cloudpickle.loads(jnp.asarray(file['settings']['u_IC']))
-              }
-        nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
+    match mode.lower():
+        case 'analysis':
+            print(f'Reading data file \n\t{exp_data_obj.resolve()}')
+            with h5py.File(exp_data_obj, 'r') as file:
+                # obj       h5py.Dataset object, vanishes once file is closed
+                # obj[:]    numpy.ndarray, read the entire array, breaks if the
+                #           data stored in dataset[key] is a scalar 
+                # obj[()]   numpy.ndarray or scalar, read whatever's in the database
+                exp_data = objs.ExperimentalData(x=file['probes']['x'][:],
+                                                 t=file['probes']['t'][:],
+                                                 solution=file['exact']['solution'][:])
+            with h5py.File(num_solution_obj, 'r') as file:
+                BC = {'u0': jnp.asarray(file['settings']['u0']), 
+                      'uL': jnp.asarray(file['settings']['uL']), 
+                      # HDF5 dataset object -> NumPy array -> lambda function
+                      'u_IC': cloudpickle.loads(jnp.asarray(file['settings']['u_IC']))
+                      }
+                nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
+                
+                beta = file['beta']['beta'][:] if 'beta' in file.keys() else None
+                exact_sol = objs.ExactSolution(x=file['mesh']['x'][:],
+                                               t=file['mesh']['t'][:],
+                                               solution=file['exact']['solution'][:],
+                                               beta=beta)
         
-        beta = file['beta']['beta'][:] if 'beta' in file.keys() else None
-        exact_sol = objs.ExactSolution(x=file['mesh']['x'][:],
-                                       t=file['mesh']['t'][:],
-                                       solution=file['exact']['solution'][:],
-                                       beta=beta)
+            problem = objs.Problem(mesh=generate_mesh(input_data), BC=BC, nu=nu, 
+                                      solver_fun=solver, STEADY=input_data['steady'])
+            
+            cost_fun_obj = objs.CostFunction(C_data=input_data['variance_observational'],
+                                             C_theta=input_data['variance_prior'],
+                                             W_reg=input_data['regularisation_weight'],
+                                             data=exp_data)
+            
+        case 'postprocessing':
+            output_data = _read_file_or_obj(input_obj, msg='input file')
+                    
+            FIML_file = Path(output_data['FIML_file'])
+            probes_file = Path(output_data['data_file'])
+            exact_sol_file = Path(output_data['exact_solution_file'])
+            out_dir = Path(output_data['output_dir'])
 
-    problem = objs.Problem(mesh=generate_mesh(input_data), BC=BC, nu=nu, 
-                              solver_fun=solver, STEADY=input_data['steady'])
+
+            # for reproducibility: write a copy of the input data
+            out_dir.mkdir(parents=True, exist_ok=True)
+            run_output_file = out_dir / 'post_used.yaml'
+            with open(run_output_file, 'w') as file:
+                yaml.safe_dump(output_data, file)
+            
+            
+            with h5py.File(exact_sol_file, 'r') as file:
+                beta = file['beta']['beta'][:] if 'beta' in file.keys() else None
+                exact_sol = objs.ExactSolution(x=file['mesh']['x'][:],
+                                               t=file['mesh']['t'][:],
+                                               solution=file['exact']['solution'][:],
+                                               beta=beta)
+                nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
     
     print_initial_message(input_data)
     
-    return problem, exp_data, exact_sol
+    return problem, exp_data, exact_sol, cost_fun_obj
 
 
 def print_initial_message(input_data):

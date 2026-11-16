@@ -199,21 +199,35 @@ class SamplingResult:
 
 @dataclass
 class CostFunction:
-    data: jax.Array
-    h_theta: Callable
     # covariance matrices
     C_data: float | jax.Array
     C_theta: float | jax.Array
-    theta_prior: jax.Array
+    data: ExperimentalData
+    h_theta: Callable | None = None
+    theta_prior: jax.Array | None = None
     # weight of the regularisation term in cost = J_fit + W_reg * J_reg
-    W_reg: float
-
+    W_reg: float = 1.0
+    # jacobian of the cost function w.r.t. theta 
+    jacobian: Callable | None = None
+    
     def __post_init__(self):
-        self.data = jnp.asarray(self.data)
+        if self.W_reg is None:
+            # original formulation: no penalisation for regularisation term
+            self.W_reg = 1
+        # check that covariance matrces are finite, symmetric, and positive definite
+        aux.check_covariance_matrix(self.C_data)
+        aux.check_covariance_matrix(self.C_theta)
+    
+    def generate_theta_prior(self, N_theta):
+        # does nothing if the prior is given
+        if self.theta_prior is None:
+            self.theta_prior = jnp.zeros(shape=(N_theta, ))
+        return self.theta_prior
     
     def __call__(self, theta):
         # cost, success = fiml.cost_function(...)
-        return fiml.cost_function(theta, d=self.data, h_theta=self.h_theta,
+        # pass data as a column vector of column vectors => (...).T
+        return fiml.cost_function(theta, d=self.data.solution.T, h_theta=self.h_theta,
                                   Cm=self.C_data, C_theta=self.C_theta,
                                   theta_prior=self.theta_prior, weight_reg=self.W_reg)
 
