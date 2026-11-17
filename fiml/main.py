@@ -93,7 +93,7 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
 def analysis(exp_data, problem, out_dir, beta_opts, cost_fun_obj, 
              N_sampling_prior, N_sampling_post, SEED, N_WORKERS, RUN_PARALLEL,
              optimiser_opts, CHECK=False, VIDEO=False, exact_sol=None, BATCH=False,
-             IDX_TIME_PLOT=-1, SAVE_EXP=True, PLOT=True, hessian='full',
+             IDX_TIME_PLOT=-1, SAVE_EXP=False, PLOT=True, hessian='full',
              input_file=None):
     
     if BATCH:
@@ -475,14 +475,9 @@ def analysis(exp_data, problem, out_dir, beta_opts, cost_fun_obj,
 
 #%% POSTPROCESSING
 
-def postprocessing(sol_file, exp_file, out_dir, problem_obj, FIML, sol_exact=None,
-                   input_data=None):
+def postprocessing(FIML, exp_data, problem, out_dir, sol_exact=None):
     
-    prior, posterior, exp, MAP, BC, input_data = aux.pack_post_data(
-                                                    sol_file=sol_file, 
-                                                    exp_file=exp_file)
-    
-    if prior.t.size == 1:
+    if FIML.prior.t.size == 1:
         aux.warning('Only one time instant in the time mesh, assuming steady flow...')
         STEADY = True
         IDX_TIME_PLOT = -1
@@ -491,22 +486,22 @@ def postprocessing(sol_file, exp_file, out_dir, problem_obj, FIML, sol_exact=Non
     
     # check where experimental data lie within the +/- 2 sigma band around the
     # sample mean value, for both the prior and the posterior
-    check_sigma_opts = {'N_sigma': 2, 't_plot': exp.t[-1]}
+    check_sigma_opts = {'N_sigma': 2, 't_plot': exp_data.t[-1]}
     # remove failed simulations
     # (use name, to unpack the tuple composed of only 1 element here)
-    post.check_experiments_in_sigma_band(prior, exp, **check_sigma_opts, 
+    post.check_experiments_in_sigma_band(FIML.prior, exp_data, **check_sigma_opts, 
                                          fig_file=out_dir/'meanSigmaExpPrior')
 
-    post.check_experiments_in_sigma_band(posterior, exp, **check_sigma_opts,
+    post.check_experiments_in_sigma_band(FIML.posterior, exp_data, **check_sigma_opts,
                                          fig_file=out_dir/'meanSigmaExpPosterior')
     
-    post.compare_prior_posterior(prior, posterior, exp, N_sigma=2, t_plot=exp.t[IDX_TIME_PLOT], 
+    post.compare_prior_posterior(FIML.prior, FIML.posterior, exp_data, N_sigma=2, t_plot=exp_data.t[IDX_TIME_PLOT], 
                                  fig_file=out_dir/'priorVSposterior')
     
     
     if sol_exact is not None:
         # compare prior, posterior and MAP beta correction to the exact one
-         post.compare_exact_beta((prior, MAP, posterior), sol_exact, 
+         post.compare_exact_beta((FIML.prior, FIML.MAP, FIML.posterior), sol_exact, 
                                  t_plot=sol_exact.t[-1], fig_file=out_dir/'checkBeta', 
                                  beta_labels=('Prior', 'Posterior', 'MAP'))
          
@@ -515,12 +510,12 @@ def postprocessing(sol_file, exp_file, out_dir, problem_obj, FIML, sol_exact=Non
                                                        fig_file=out_dir/'checkBetaParam')
 
          run_solver_fun = lambda theta_ex: run_solver_case(None, theta_ex, 
-                                             problem_obj.solver_fun, 
-                                             *problem_obj.solver_args(FIML.beta_fun),
+                                             problem.solver_fun, 
+                                             *problem.solver_args(FIML.beta_fun),
                                              out_dir=None)[1:]
          # solve the PDE with the "exact" value of theta => you should get the
          # exact solution
-         post.check_exact_beta_PDE(theta_ex, run_solver_fun, sol_exact, problem_obj)
+         post.check_exact_beta_PDE(theta_ex, run_solver_fun, sol_exact, problem)
     
     # keep the terminal on hold to avoid closing figures immediately
     aux.warning('Close all figures to terminate the execution')

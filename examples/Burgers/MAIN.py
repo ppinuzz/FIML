@@ -10,14 +10,13 @@ import sys
 import jax
 # use float64, rather than float32
 jax.config.update('jax_enable_x64', True)
-import jax.numpy as jnp
-import cloudpickle
 import yaml
 from copy import deepcopy
-import h5py
 import argparse
 
 from burgers import solve_Burgers
+# required when loading the FIML object
+import burgers
 FIML_pkg = Path(r'C:\Andrea\Dottorato\FIML')
 if str(FIML_pkg) not in sys.path:
     sys.path.append(str(FIML_pkg))
@@ -74,8 +73,6 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
         # of the caller script
         input_data= deepcopy(input_data)
         
-        sol_file = Path(input_data['files']['solution'])
-        probes_file = Path(input_data['files']['data'])
         out_dir = Path(input_data['files']['output_dir'])
         
         beta_opts = fiml.beta.read_beta_options(input_data['beta'])
@@ -97,48 +94,31 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
         run_input_file = out_dir / 'input_used.yaml'
         with open(run_input_file, 'w') as file:
             yaml.safe_dump(input_data, file)
+        
+        
+        problem, exp_data, exact_sol, cost_fun_obj = fiml.auxiliaries.read_input_data(
+                                            input_data, mode='analysis', 
+                                            solver=solve_Burgers)
+        
     
     if POST_PROC:
         if output_data is None:
             with open(OUTPUT_FILE, 'r') as file:
                 output_data = yaml.safe_load(file)
-        
-        output_data = deepcopy(output_data)
-                
-        FIML_file = Path(output_data['FIML_file'])
-        probes_file = Path(output_data['data_file'])
-        exact_sol_file = Path(output_data['exact_solution_file'])
-        out_dir = Path(output_data['output_dir'])
-
-
         # for reproducibility: write a copy of the input data
+        out_dir = Path(output_data['output_dir'])
         out_dir.mkdir(parents=True, exist_ok=True)
         run_output_file = out_dir / 'post_used.yaml'
         with open(run_output_file, 'w') as file:
             yaml.safe_dump(output_data, file)
-
-
-    #%% REPACK DATA
-    
-    if ANALYSIS:
-        problem, exp_data, exact_sol, cost_fun_obj = fiml.auxiliaries.read_input_data(
-                                            input_data, sol_file, probes_file, 
-                                            solve_Burgers)
         
-
-    if POST_PROC:
-        with h5py.File(exact_sol_file, 'r') as file:
-            sol_exact = fiml.objects.ExactSolution(x=file['mesh']['x'][:],
-                                                   t=file['mesh']['t'][:],
-                                                   solution=file['exact']['solution'][:],
-                                                   beta=file['beta']['beta'][:])
-            nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
+        problem, sol_exact, exp_data, FIML = fiml.auxiliaries.read_input_data(output_data, mode='postprocessing')
 
     
     #%% LAUNCH CODE
+    
     if POST_PROC:
-        return fiml.main.postprocessing(FIML_file, probes_file, out_dir, solve_Burgers, 
-                                        nu, sol_exact=sol_exact)
+        return fiml.main.postprocessing(FIML, exp_data, problem, out_dir, sol_exact)
     if ANALYSIS:
         return fiml.main.analysis(exp_data, problem, out_dir, beta_opts,
                                   cost_fun_obj, N_sampling_prior, N_sampling_post, SEED,

@@ -400,74 +400,108 @@ def print_theta(theta_MAP, theta_prior, STEADY, t_mesh=None, t=None):
     check_msg(theta_report.get_string())
 
 
-def read_input_data(input_obj=None, num_solution_obj=None, exp_data_obj=None, solver=None, mode='analysis'):
+def read_input_data(input_obj, mode, solver=None):   
     input_data = _read_file_or_obj(input_obj, msg='input file')
     
     match mode.lower():
         case 'analysis':
-            print(f'Reading data file \n\t{exp_data_obj.resolve()}')
-            with h5py.File(exp_data_obj, 'r') as file:
-                # obj       h5py.Dataset object, vanishes once file is closed
-                # obj[:]    numpy.ndarray, read the entire array, breaks if the
-                #           data stored in dataset[key] is a scalar 
-                # obj[()]   numpy.ndarray or scalar, read whatever's in the database
-                exp_data = objs.ExperimentalData(x=file['probes']['x'][:],
-                                                 t=file['probes']['t'][:],
-                                                 solution=file['exact']['solution'][:])
-            with h5py.File(num_solution_obj, 'r') as file:
-                BC = {'u0': jnp.asarray(file['settings']['u0']), 
-                      'uL': jnp.asarray(file['settings']['uL']), 
-                      # HDF5 dataset object -> NumPy array -> lambda function
-                      'u_IC': cloudpickle.loads(jnp.asarray(file['settings']['u_IC']))
-                      }
-                nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
-                
-                beta = file['beta']['beta'][:] if 'beta' in file.keys() else None
-                exact_sol = objs.ExactSolution(x=file['mesh']['x'][:],
-                                               t=file['mesh']['t'][:],
-                                               solution=file['exact']['solution'][:],
-                                               beta=beta)
-        
-            problem = objs.Problem(mesh=generate_mesh(input_data), BC=BC, nu=nu, 
-                                      solver_fun=solver, STEADY=input_data['steady'])
-            
-            cost_fun_obj = objs.CostFunction(C_data=input_data['variance_observational'],
-                                             C_theta=input_data['variance_prior'],
-                                             W_reg=input_data['regularisation_weight'],
-                                             data=exp_data)
-            
+            return _read_analysis_input(input_data, input_data['files']['solution'], input_data['files']['data'], solver)
         case 'postprocessing':
-            output_data = _read_file_or_obj(input_obj, msg='input file')
-                    
-            FIML_file = Path(output_data['FIML_file'])
-            probes_file = Path(output_data['data_file'])
-            exact_sol_file = Path(output_data['exact_solution_file'])
-            out_dir = Path(output_data['output_dir'])
+            return _read_postproc_input(input_data, input_data['FIML_file'], input_data['exact_solution_file'], input_data['data_file'])
+        case _:
+            raise ValueError("Missing or invalid mode: either 'analysis' or 'postprocessing'")
 
 
-            # for reproducibility: write a copy of the input data
-            out_dir.mkdir(parents=True, exist_ok=True)
-            run_output_file = out_dir / 'post_used.yaml'
-            with open(run_output_file, 'w') as file:
-                yaml.safe_dump(output_data, file)
-            
-            
-            with h5py.File(exact_sol_file, 'r') as file:
-                beta = file['beta']['beta'][:] if 'beta' in file.keys() else None
-                exact_sol = objs.ExactSolution(x=file['mesh']['x'][:],
-                                               t=file['mesh']['t'][:],
-                                               solution=file['exact']['solution'][:],
-                                               beta=beta)
-                nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
+def _read_analysis_input(input_data, exact_sol_file, exp_data_file, solver):
     
-    print_initial_message(input_data)
+    exp_data_file = Path(exp_data_file)
+    print(f'Reading experimental data from \n\t{exp_data_file.resolve()}')
+    with h5py.File(exp_data_file, 'r') as file:
+        # obj       h5py.Dataset object, vanishes once file is closed
+        # obj[:]    numpy.ndarray, read the entire array, breaks if the
+        #           data stored in dataset[key] is a scalar 
+        # obj[()]   numpy.ndarray or scalar, read whatever's in the database
+        exp_data = objs.ExperimentalData(x=file['probes']['x'][:],
+                                         t=file['probes']['t'][:],
+                                         solution=file['exact']['solution'][:])
+    
+    exact_sol_file = Path(exact_sol_file)
+    print(f'Reading exact solution from \n\t{exact_sol_file.resolve()}')
+    with h5py.File(exact_sol_file, 'r') as file:
+        BC = {'u0': jnp.asarray(file['settings']['u0']), 
+              'uL': jnp.asarray(file['settings']['uL']), 
+              # HDF5 dataset object -> NumPy array -> lambda function
+              'u_IC': cloudpickle.loads(jnp.asarray(file['settings']['u_IC']))
+              }
+        nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
+        
+        beta = file['beta']['beta'][:] if 'beta' in file.keys() else None
+        exact_sol = objs.ExactSolution(x=file['mesh']['x'][:],
+                                       t=file['mesh']['t'][:],
+                                       solution=file['exact']['solution'][:],
+                                       beta=beta)
+
+    
+    problem = objs.Problem(mesh=generate_mesh(input_data), BC=BC, nu_baseline=nu, 
+                           solver_fun=solver, STEADY=input_data['steady'])
+    
+    cost_fun_obj = objs.CostFunction(C_data=input_data['variance_observational'],
+                                     C_theta=input_data['variance_prior'],
+                                     W_reg=input_data['regularisation_weight'],
+                                     data=exp_data)
+    
+    print('INPUT DATA: ')
+    _print_dict(input_data)
     
     return problem, exp_data, exact_sol, cost_fun_obj
 
 
-def print_initial_message(input_data):
-    print(f'INPUT DATA: ')
-    _print_dict(input_data)
+def _read_postproc_input(output_data, FIML_file, exact_sol_file, exp_data_file=None):
+            
+    FIML_file = Path(FIML_file)
+    print(f'Reading FIML data from \n\t{FIML_file.resolve()}')
+    with open(FIML_file, 'rb') as file:
+        FIML = cloudpickle.load(file)
+    
+    if exp_data_file is not None:
+        exp_data_file = Path(exp_data_file)
+        print(f'Reading experimental data from \n\t{exp_data_file.resolve()}')
+        with h5py.File(exp_data_file, 'r') as file:
+            # obj       h5py.Dataset object, vanishes once file is closed
+            # obj[:]    numpy.ndarray, read the entire array, breaks if the
+            #           data stored in dataset[key] is a scalar 
+            # obj[()]   numpy.ndarray or scalar, read whatever's in the database
+            exp_data = objs.ExperimentalData(x=file['probes']['x'][:],
+                                             t=file['probes']['t'][:],
+                                             solution=file['exact']['solution'][:])
+    else:
+        print('No experimental data file given, using the experimental data '
+              'stored in the FIML object (FIML.exp_data)...')
+        exp_data = FIML.exp_data
+    
+    exact_sol_file = Path(exact_sol_file)
+    print(f'Reading exact solution from \n\t{exact_sol_file.resolve()}')
+    with h5py.File(exact_sol_file, 'r') as file:
+# =============================================================================
+#         BC = {'u0': jnp.asarray(file['settings']['u0']), 
+#               'uL': jnp.asarray(file['settings']['uL']), 
+#               # HDF5 dataset object -> NumPy array -> lambda function
+#               'u_IC': cloudpickle.loads(jnp.asarray(file['settings']['u_IC']))
+#               }
+#         nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
+# =============================================================================
+        
+        beta = file['beta']['beta'][:] if 'beta' in file.keys() else None
+        exact_sol = objs.ExactSolution(x=file['mesh']['x'][:],
+                                       t=file['mesh']['t'][:],
+                                       solution=file['exact']['solution'][:],
+                                       beta=beta)
+    
+    print('POSTPROCESSING DATA: ')
+    _print_dict(output_data)
+    
+    return FIML.problem, exact_sol, exp_data, FIML
+
 
 
 def _print_dict(input_dict, prefix=''):
@@ -485,10 +519,62 @@ def _read_file_or_obj(input_obj, msg=''):
         input_obj = Path(input_obj)
         print(f'Reading {msg} \n\t{input_obj.resolve()}')
         with open(input_obj, 'r') as file:
-            input_data = yaml.safe_load(file)
+            match input_obj.suffix:
+                case '.yaml':
+                    input_data = yaml.safe_load(file)
+                case '.pkl':
+                    input_data = cloudpickle.load(file)
+                case _:
+                    raise ValueError(f"Unknown file extension {input_obj.suffix}")
     elif isinstance(input_obj, dict):
         input_data = input_obj.copy()
     else:
         raise ValueError('Unknown input object type: neither Path, nor str')
     return input_data
+
+
+def pack_post_data(FIML=None, sol_file=None, exp_file=None):
     
+    if FIML is not None:
+        return FIML
+    
+    if sol_file is not None and exp_file is not None:
+        sol_file = Path(sol_file)
+        print(f'Reading FIML solution from \n\t{sol_file.resolve()}')
+        # https://stackoverflow.com/a/41586571/17220538
+        with h5py.File(sol_file, 'r') as file:
+            print('Available groups (left) and their datasets (right): ')
+            for group_name, group in file.items():
+                print('\t', group_name, '\t', list(group.keys()))
+            
+            prior_data = load_dataset(file, 'prior')
+            posterior_data = load_dataset(file, 'posterior')
+            MAP_data = load_dataset(file, 'MAP')
+            mesh = load_dataset(file, 'mesh')
+            input_data = load_dataset(file, 'input_data')
+            BC = load_dataset(file, 'boundary_conditions')
+            
+            prior = SimpleNamespace(
+                x=jnp.asarray(mesh['x']),
+                t=jnp.asarray(mesh['t']),
+                solution=jnp.asarray(prior_data['solution']),
+                beta=jnp.asarray(prior_data['beta']))
+            posterior = SimpleNamespace(
+                x=jnp.asarray(mesh['x']),
+                t=jnp.asarray(mesh['t']),
+                solution=jnp.asarray(posterior_data['solution']),
+                beta=jnp.asarray(posterior_data['beta']))
+            MAP = SimpleNamespace(
+                x=jnp.asarray(mesh['x']),
+                t=jnp.asarray(mesh['t']),
+                solution=jnp.asarray(MAP_data['solution']),
+                beta=jnp.asarray(MAP_data['beta']))
+        
+        exp_file = Path(exp_file)
+        print(f'Reading experimental data from \n\t{exp_file.resolve()}')
+        with h5py.File(exp_file, 'r') as file:
+            exp_data = load_dataset(file)
+            exp = objs.ExperimentalData(x=exp_data['x'], t=exp_data['t'], 
+                                        solution=exp_data['solution'])
+    
+    return prior, posterior, exp, MAP, BC, input_data

@@ -23,8 +23,9 @@ class Problem:
     #   Problem.mesh        => error (AttributeError)
     mesh: InitVar[dict]
     BC: dict
-    nu: Callable
-    solver_fun: Callable
+    # in Burgers, nu = nu0 * beta => nu_baseline = nu0
+    nu_baseline: Callable
+    solver_fun: Callable | None
     # optional input: if not given by the user, it will be calculated based
     # on the size of t_mesh (1 time instant => steady problem)
     STEADY: bool | None = None
@@ -43,39 +44,41 @@ class Problem:
     # being a POST-init, this is called only after __init__() has been called
     # (which happens when the class is instantiated)
     def __post_init__(self, mesh):
-        # SPACE MESH
-        # HACK: assuming uniform spacing in time and space
-        self.x_mesh = jnp.ravel(jnp.asarray(mesh['x']))
-        # shape is (Nx, ) or, at most, (Nx, 1) => size (total number of elements)
-        # is Nx either way
-        self.Nx = self.x_mesh.size
-        dx = jnp.diff(self.x_mesh)
-        if not jnp.all(jnp.isclose(dx, dx[0])):
-            raise ValueError('Only uniform space grids are supported')
-        self.dx = dx[0]
-        
-        # TIME MESH
-        self.t_mesh = jnp.ravel(jnp.asarray(mesh['t']))
-        self.Nt = self.t_mesh.size
-        if self.STEADY is None:
-            # to have a more general solver, steady problems still have a time mesh
-            # (and solutions have shape (Nt,Nx), i.e. (1,Nx), rather than (Nx,))
-            # but with only 1 time instant, t = 0
-            self.STEADY = (self.Nt == 1)
-        if self.STEADY and self.Nt != 1:
-            raise ValueError('Steady problems require exactly ONE time instant (e.g. t = 0)')
-        if not self.STEADY and self.Nt < 2:
-            raise ValueError('Unsteady problems require at least TWO time instants')
-        if not self.STEADY:
-            dt = jnp.diff(self.t_mesh)
-            if not jnp.all(jnp.isclose(dt, dt[0])):
+        # (if not empty dict)
+        if mesh:
+            # SPACE MESH
+            # HACK: assuming uniform spacing in time and space
+            self.x_mesh = jnp.ravel(jnp.asarray(mesh['x']))
+            # shape is (Nx, ) or, at most, (Nx, 1) => size (total number of elements)
+            # is Nx either way
+            self.Nx = self.x_mesh.size
+            dx = jnp.diff(self.x_mesh)
+            if not jnp.all(jnp.isclose(dx, dx[0])):
                 raise ValueError('Only uniform space grids are supported')
-            self.dt = dt[0]
-            self.T = self.t_mesh[-1] - self.t_mesh[0]
-        else:
-            # problem treated as steady => set dt to None
-            self.dt = None
-            self.T = None
+            self.dx = dx[0]
+            
+            # TIME MESH
+            self.t_mesh = jnp.ravel(jnp.asarray(mesh['t']))
+            self.Nt = self.t_mesh.size
+            if self.STEADY is None:
+                # to have a more general solver, steady problems still have a time mesh
+                # (and solutions have shape (Nt,Nx), i.e. (1,Nx), rather than (Nx,))
+                # but with only 1 time instant, t = 0
+                self.STEADY = (self.Nt == 1)
+            if self.STEADY and self.Nt != 1:
+                raise ValueError('Steady problems require exactly ONE time instant (e.g. t = 0)')
+            if not self.STEADY and self.Nt < 2:
+                raise ValueError('Unsteady problems require at least TWO time instants')
+            if not self.STEADY:
+                dt = jnp.diff(self.t_mesh)
+                if not jnp.all(jnp.isclose(dt, dt[0])):
+                    raise ValueError('Only uniform space grids are supported')
+                self.dt = dt[0]
+                self.T = self.t_mesh[-1] - self.t_mesh[0]
+            else:
+                # problem treated as steady => set dt to None
+                self.dt = None
+                self.T = None
         
         # BOUNDARY CONDITIONS
         self.u0 = self.BC['u0']
@@ -90,7 +93,7 @@ class Problem:
     # pack various data into the tuple required by the solver, in the order
     # required by the solver
     def solver_args(self, beta_fun):
-        return (beta_fun, self.nu, self.x_mesh, self.t_mesh,
+        return (beta_fun, self.nu_baseline, self.x_mesh, self.t_mesh,
                 self.u_IC, self.u0, self.uL, self.STEADY)
 
 @dataclass

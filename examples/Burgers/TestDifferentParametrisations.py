@@ -15,7 +15,6 @@ from copy import deepcopy
 import traceback
 import argparse
 from prettytable import PrettyTable
-from pathlib import Path
 
 pkg = Path(r'C:\Andrea\Dottorato\FIML\examples\Burgers')
 if str(pkg) not in sys.path:
