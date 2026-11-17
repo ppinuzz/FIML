@@ -226,8 +226,10 @@ class CostFunction:
     
     def __call__(self, theta):
         # cost, success = fiml.cost_function(...)
-        # pass data as a column vector of column vectors => (...).T
-        return fiml.cost_function(theta, d=self.data.solution.T, h_theta=self.h_theta,
+        # pass data as a column vector of column vectors => (...).T has shape
+        # (N,1), unravel it to pass it as (N, )
+        return fiml.cost_function(theta, d=jnp.ravel(self.data.solution.T), 
+                                  h_theta=self.h_theta,
                                   Cm=self.C_data, C_theta=self.C_theta,
                                   theta_prior=self.theta_prior, weight_reg=self.W_reg)
 

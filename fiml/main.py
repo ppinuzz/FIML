@@ -364,7 +364,8 @@ def analysis(exp_data, problem, out_dir, beta_opts, cost_fun_obj,
     start_time = perf_counter()
     match hessian.lower():
         case 'full':
-            H_MAP = jax.jacfwd(jax.jacfwd(cost_with_aux, has_aux=True), has_aux=True)(FIML.MAP.theta)
+            # const_with_aux returns (jacobian, aux) => select 0th element
+            H_MAP = jax.jacfwd(jax.jacfwd(cost_with_aux, has_aux=True), has_aux=True)(FIML.MAP.theta)[0]
         case 'gauss_newton':
             # h_theta returns the solution and the success flag => pass a wrapper
             # function that returns only the solution, to avoid having JAX
@@ -373,7 +374,7 @@ def analysis(exp_data, problem, out_dir, beta_opts, cost_fun_obj,
                                               FIML.MAP.theta, cost_fun_obj.C_data, cost_fun_obj.C_theta)
         case 'test':
             aux.warning('Calculating the Hessian matrix using all available options...')
-            H_MAP_full = jax.jacfwd(jax.jacfwd(cost_with_aux, has_aux=True), has_aux=True)(FIML.MAP.theta)
+            H_MAP_full = jax.jacfwd(jax.jacfwd(cost_with_aux, has_aux=True), has_aux=True)(FIML.MAP.theta)[0]
             H_MAP_GN = fiml.Gauss_Newton_hessian(lambda theta: h_theta(theta)[0], 
                                                  FIML.MAP.theta, cost_fun_obj.C_data, cost_fun_obj.C_theta)
             err_GN = jnp.linalg.norm(H_MAP_GN - H_MAP_full) / jnp.linalg.norm(H_MAP_full)
@@ -419,7 +420,7 @@ def analysis(exp_data, problem, out_dir, beta_opts, cost_fun_obj,
                                          t_plot=exp_data.t[IDX_TIME_PLOT], 
                                          fig_file=out_dir/'meanSigmaExpPosterior', PLOT=PLOT)
     
-    post.compare_prior_posterior(FIML.prior, FIML.posterior, exp_data, 
+    post.compare_prior_posterior(FIML.prior, FIML.posterior, exp_data, MAP=FIML.MAP,
                                  N_sigma=2, t_plot=exp_data.t[IDX_TIME_PLOT], 
                                  fig_file=out_dir/'priorVSposterior', PLOT=PLOT)
     

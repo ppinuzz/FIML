@@ -251,7 +251,7 @@ def compare_exact_beta(sol_objs, exact_sol, t_plot=None, fig_file=None,
         
         
 
-def compare_prior_posterior(prior, post, exp, ax_sol=2, N_sigma=2, t_plot=None, 
+def compare_prior_posterior(prior, post, exp, MAP=None, ax_sol=2, N_sigma=2, t_plot=None, 
                             fig_file=None, PLOT=True, VIDEO=False):
     
     if ~jnp.all(jnp.isclose(prior.x, post.x)):
@@ -300,12 +300,12 @@ def compare_prior_posterior(prior, post, exp, ax_sol=2, N_sigma=2, t_plot=None,
     # actual time instant plotted 
     t_exp_plot = exp.t[idx_plot_exp]
     # interpolate numerical solution at that time instant
-    u_mean_prior_exp = aux.sample_solution(u_mean_prior, x_mesh=x, t_mesh=t, t_probes=t_exp_plot)
-    u_upper_prior_exp = aux.sample_solution(u_upper_prior, x_mesh=x, t_mesh=t, t_probes=t_exp_plot)
-    u_lower_prior_exp = aux.sample_solution(u_lower_prior, x_mesh=x, t_mesh=t, t_probes=t_exp_plot)
-    u_mean_post_exp = aux.sample_solution(u_mean_post, x_mesh=x, t_mesh=t, t_probes=t_exp_plot)
-    u_upper_post_exp = aux.sample_solution(u_upper_post, x_mesh=x, t_mesh=t, t_probes=t_exp_plot)
-    u_lower_post_exp = aux.sample_solution(u_lower_post, x_mesh=x, t_mesh=t, t_probes=t_exp_plot)
+    u_mean_prior_exp = aux.sample_solution(u_mean_prior, t_mesh=t, t_probes=t_exp_plot)
+    u_upper_prior_exp = aux.sample_solution(u_upper_prior, t_mesh=t, t_probes=t_exp_plot)
+    u_lower_prior_exp = aux.sample_solution(u_lower_prior, t_mesh=t, t_probes=t_exp_plot)
+    u_mean_post_exp = aux.sample_solution(u_mean_post, t_mesh=t, t_probes=t_exp_plot)
+    u_upper_post_exp = aux.sample_solution(u_upper_post, t_mesh=t, t_probes=t_exp_plot)
+    u_lower_post_exp = aux.sample_solution(u_lower_post, t_mesh=t, t_probes=t_exp_plot)
     
     if PLOT:
         fig = plt.figure()
@@ -314,6 +314,10 @@ def compare_prior_posterior(prior, post, exp, ax_sol=2, N_sigma=2, t_plot=None,
         
         plt.plot(post.x, u_mean_post_exp, label='Posterior', color='b')
         plt.fill_between(post.x, u_upper_post_exp, u_lower_post_exp, alpha=0.3, color='b')
+        
+        if MAP is not None:
+            u_MAP = aux.sample_solution(MAP.solution, t_mesh=MAP.t, t_probes=t_exp_plot)
+            plt.plot(MAP.x, u_MAP, label='MAP', color='tab:orange')
         
         plt.plot(exp.x, exp.solution[idx_plot_exp,:], 'k*', label='Experiment')
         plt.xlabel('$x$ [-]')
