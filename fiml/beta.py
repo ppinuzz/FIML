@@ -285,6 +285,20 @@ def _invert_softplus(beta, beta_min, beta_ref=1):
     return z
 
 
+def is_valid_beta(beta, not_negative=True, not_zero=True):
+    finite = jnp.isfinite(beta)
+    N_nan = jnp.count_nonzero(~finite)
+    if not_negative:
+        not_neg = (beta > 0) if not_zero else (beta >= 0)
+    else:
+        not_neg = jnp.full_like(finite, fill_value=True)
+    N_neg = jnp.count_nonzero(~not_neg)
+    valid = finite & not_neg
+    N_valid = jnp.count_nonzero(valid)
+    stats = {'N_neg': N_neg, 'N_nan': N_nan, 'N_valid': N_valid}
+    return valid, stats
+    
+
 # no need to JIT compile it, as this function is called only once during the
 # optimisation & you'd need to pass p as a static argument, as it's used to
 # determine an array shape, which must be known at compile-time

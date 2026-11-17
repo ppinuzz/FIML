@@ -54,10 +54,10 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
     # check if solver didn't converge or produced NaN's/Inf's
     not_converged = (max_res >= TOL)
     nan_inf_values = jnp.any(~jnp.isfinite(solution), axis=1) | ~jnp.isfinite(max_res)
-    # HACK: implemented only for steady problems...
-    if STEADY:
-        beta_check = beta_fun(theta_r, x=x_mesh, t=t_mesh, u=solution)
-        N_beta_neg = jnp.count_nonzero(beta_check <= 0)
+    # FIXME: implemented only for steady problems...
+    beta_check = beta_fun(theta_r, x=x_mesh, t=t_mesh, u=solution)
+    _, beta_stats = betamod.is_valid_beta(beta_check)
+    success = ~jnp.any(not_converged | nan_inf_values)
     # jax.lax.cond() replaces if (...) when the object is a JAX object in a JIT
     # compiled function
     jax.lax.cond(PRINT_ERR_MSG & jnp.any(not_converged), 
@@ -67,7 +67,7 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
                              n_fail=jnp.count_nonzero(not_converged),
                              n_tot=not_converged.size,
                              run_id=run_id,
-                             N_beta_neg=N_beta_neg,
+                             N_beta_neg=beta_stats['N_neg'],
                              N_beta=beta_check.size),
                  lambda _: None,
                  operand=PRINT_ERR_MSG
@@ -80,12 +80,12 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
                              n_nan=jnp.count_nonzero(nan_inf_values),
                              n_tot=nan_inf_values.size,
                              run_id=run_id,
-                             N_beta_neg=N_beta_neg,
+                             N_beta_neg=beta_stats['N_neg'],
                              N_beta=beta_check.size),
                  lambda _: None,
                  operand=PRINT_ERR_MSG
                  )
-    success = ~jnp.any(not_converged | nan_inf_values)
+    
     
     return run_id, solution, max_res, success
 

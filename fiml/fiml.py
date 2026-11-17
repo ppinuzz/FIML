@@ -320,6 +320,12 @@ def minimise_cost_function(cost_and_jacobian, x0, method='amsgrad',
         def optimisation_step(state):
             theta, opt_state, cost, grad, N_it, N_fun_eval, valid, failed, history = state
             updates, opt_state_trial = optimiser.update(grad, opt_state, theta)
+            # check if the step is in a descent direction (i.e. grad projected
+            # in direction of the step delta should be < 0)
+            #grad_directional = jnp.vdot(grad, updates)
+            # FIXME: where the direction is not a descent one, use the basic 
+            # descent (fixed learning rate, use only gradient) 
+            #updates = jnp.where(grad_directional<0, updates, -learn_rate*grad)
             # N_attempts, accepted, theta, J, grad(J)
             trial_state = (0, False, theta, cost, grad)
 
