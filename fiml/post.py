@@ -357,9 +357,9 @@ def check_parametrisation_fitness(sol_exact, opts, PLOT=True, fig_file=None):
             z_exact = betamod._invert_softplus(sol_exact.beta, opts['beta_min'], opts['beta_ref'])
         case 'BxBt_exp':
             # exp models:
-            #   beta = e^z
+            #   beta = beta_ref * e^z
             # shape: (Nx, Nt)
-            z_exact = jnp.log(sol_exact.beta)
+            z_exact = jnp.log(sol_exact.beta / opts['beta_ref'])
         case 'BxBt' | 'RBF_Gauss_x' | 'RBF_Gauss_u' | 'RBF_Gauss_x_poly' | 'RBF_Gauss_uu':
             # shape: (Nx, Nt)
             z_exact = sol_exact.beta - opts['beta_ref']

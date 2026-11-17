@@ -40,7 +40,7 @@ def read_beta_options(opts):
         case 'RBF_Gauss_x_poly' | 'RBF_Gauss_x_poly_softplus':
             beta_opts['num_RBF'] = int(opts['num_RBF'])
             beta_opts['poly_deg'] = jnp.asarray(opts['poly_degrees_bases'])
-        case 'RBF_Gauss_uu':
+        case 'RBF_Gauss_uu' | 'RBF_Gauss_uu_softplus':
             beta_opts['num_RBF'] = int(opts['num_RBF'])
             beta_opts['u_limits'] = jnp.asarray(opts['solution_limits'])
         case _:
@@ -102,7 +102,7 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             Phi = jnp.column_stack((Phi_RBF, P))
             params['Phi'] = Phi
             N_params = Phi.shape[1]
-        case 'RBF_Gauss_uu':
+        case 'RBF_Gauss_uu' | 'RBF_Gauss_uu_softplus':
              u_lims = opts['u_limits']
              u_c = jnp.linspace(u_lims[0], u_lims[1], opts['num_RBF'])
              N_params = opts['num_RBF']
@@ -148,14 +148,18 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
             beta = lambda theta, u=None, x=None, t=None: _beta_RBF_Gauss_x_softplus(
                         theta, Phi, t_mesh.size, opts['beta_ref'], opts['beta_min'])
         case 'RBF_Gauss_u_softplus':
+            DEPENDS_ON_U = True
             beta = lambda theta, u=None, x=None, t=None: _beta_RBF_Gauss_u_softplus(
                         theta, x_c, x_mesh, u, opts['beta_ref'], 
                         opts['shape_factor'], opts['beta_min'])
-            DEPENDS_ON_U = True
         case 'RBF_Gauss_uu':
             DEPENDS_ON_U = True
             beta = lambda theta, u=None, x=None, t=None: _beta_RBF_Gauss_uu(
                         theta, u_c, u, opts['beta_ref'], opts['shape_factor'])
+        case 'RBF_Gauss_uu_softplus':
+            DEPENDS_ON_U = True
+            beta = lambda theta, u=None, x=None, t=None: _beta_RBF_Gauss_uu_softplus(
+                        theta, u_c, u, opts['beta_ref'], opts['shape_factor'], opts['beta_min'])
         case _:
             raise ValueError(f"Unknown beta model '{opts['model']}'")
     
@@ -188,7 +192,7 @@ def _beta_BxBt_softplus(theta_r, B_x, B_t, beta_ref, beta_min):
 def _beta_BxBt_exp(theta_r, B_x, B_t, beta_ref):
     # beta = exp(z), with z = sum_mq Bm(x) theta_mq Bq(t)
     z = _beta_BxBt(theta_r, B_x, B_t, beta_ref=0)
-    beta_r = jnp.exp(z)
+    beta_r = beta_ref * jnp.exp(z)
     return beta_r
 
 def _beta_RBF_Gauss_x(theta_r, Phi, N_t, beta_ref):
