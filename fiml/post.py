@@ -155,7 +155,7 @@ def compare_exact_beta(sol_objs, exact_sol, t_plot=None, fig_file=None,
         fig_err, ax_err = plt.subplots()
         ax_err.axhline(0, color='k', linestyle='--')
         ax_err.set_xlabel(r'$x$ [-]')
-        ax_err.set_ylabel(r'$(\phi- \phi_\mathrm{ex})/\phi_\mathrm{ex}$ [\%]')
+        ax_err.set_ylabel(r'$(\beta - \beta_\mathrm{ex})/\beta_\mathrm{ex}$ [\%]')
         ax_err.autoscale(enable=True, axis='x', tight=True)
         ax_err.set_title(fr'Errors (solid: $\beta$, dashed: $u$) {time_str}')
         ax_sol = ax_err.twinx()
@@ -477,7 +477,7 @@ def check_parametrisation_fitness(sol_exact, opts, PLOT=True, fig_file=None):
         plt.autoscale(enable=True, axis='x', tight=True)
         plt.show(block=False)
         if fig_file is not None:
-            aux.save_fig(fig_err, '{fig_file.name}_error', fig_file.parent)
+            aux.save_fig(fig_err, f'{fig_file.name}_error', fig_file.parent)
     
     return theta
 
@@ -541,7 +541,7 @@ def check_exact_beta_PDE(theta_ex, run_solver, sol_exact, problem, PLOT=True,
                        origin='upper', aspect='auto')
         ax.set_xlabel('$t$ [-]')
         ax.set_ylabel('$x$ [-]')
-        ax.set_title(r'Solution at $\theta = \theta_\mathrm{fit}$ vs experiment$')
+        ax.set_title(r'Solution at $\theta = \theta_\mathrm{fit}$ vs experiment')
         col_bar = fig_delta.colorbar(im, ax=ax)
         col_bar.set_label(r'$|u_\mathrm{ex} - u(\theta_\mathrm{fit})|$ [-]')
         if fig_file is not None:

@@ -97,7 +97,9 @@ def compare_baseline_MAP_solutions(MAP, theta_baseline, solver_wrap,
                                    exp, t=None, t_exp=None,
                                    PLOT=True, fig_name=None):
     # baseline solution (beta = 1 => theta = 0)
-    _, sol_baseline, _, _ = solver_wrap(theta_baseline)
+    _, sol_baseline, _, baselike_valid = solver_wrap(theta_baseline)
+    if not baselike_valid or not MAP.success:
+        raise ValueError('MAP/baseline comparison requires successful forward solutions')
     # sample both solutions at probe locations
     sol_MAP_probes = aux.sample_solution(MAP.solution, x_mesh=MAP.x, t_mesh=t, 
                                          x_probes=exp.x, t_probes=t_exp)
@@ -209,7 +211,7 @@ def Gauss_Newton_hessian(h_fun, theta_MAP, Cm, Ctheta):
 
 
 def invert_covariance_matrix(C, at_least_2d=False, N=None):
-    if at_least_2d and N is None:
+    if C.dim == 0 and at_least_2d and N is None:
         raise ValueError('If C is a scalar and a 2D covariance matrix is required, '
                          'it is mandatory to provide the dimension N of the matrix')
     C = jnp.asarray(C)
