@@ -56,8 +56,8 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
     nan_inf_values = jnp.any(~jnp.isfinite(solution), axis=1) | ~jnp.isfinite(max_res)
     # FIXME: implemented only for steady problems...
     beta_check = beta_fun(theta_r, x=x_mesh, t=t_mesh, u=solution)
-    _, beta_stats = betamod.is_valid_beta(beta_check)
-    success = ~jnp.any(not_converged | nan_inf_values)
+    beta_valid, beta_stats = betamod.is_valid_beta(beta_check)
+    success = ~jnp.any(not_converged | nan_inf_values) & beta_valid.all()
     # jax.lax.cond() replaces if (...) when the object is a JAX object in a JIT
     # compiled function
     jax.lax.cond(PRINT_ERR_MSG & jnp.any(not_converged), 
@@ -85,6 +85,19 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
                  lambda _: None,
                  operand=PRINT_ERR_MSG
                  )
+    jax.lax.cond(PRINT_ERR_MSG & ~beta_valid.all(),
+                 lambda _: jax.debug.print(
+                             'Run {run_id}: invalid beta at {n_bad}/{n_total} points '
+                             '(nonpositive: {n_neg}, nonfinite: {n_nan})',
+                            run_id=run_id,
+                            n_bad=beta_check.size - beta_stats['N_valid'],
+                            n_total=beta_check.size,
+                            n_neg=beta_stats['N_neg'],
+                            n_nan=beta_stats['N_nan']
+                ),
+                lambda _: None,
+                operand=None
+                )
     
     
     return run_id, solution, max_res, success
