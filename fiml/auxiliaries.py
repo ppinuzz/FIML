@@ -207,7 +207,11 @@ def save_sampling(hdf5_file, group_name, opts, data_obj, save_failed_runs=False)
                    'beta': ('Correction beta(x,y) with dimensione (Nx, Nt), '
                             'transposed ordering w.r.t. solution variable'),
                    'key_random': ('Key used to randomly draw the parameters '
-                                  'for the sampling')
+                                  'for the sampling'),
+                   # these 3 are available only with FIML.MAP, ignored otherwise
+                   'covariance': 'Covariance matrix calculated as H(theta_MAP)',
+                   'jacobian': 'Jacobian matrix of the cost function J(theta)',
+                   'hessian': 'Hessian matrix of the cost function J(theta)'
                    }
     
     print(f"Saving the following fields in HDF5 group '{group_name}': {FIELDS_SAVE.keys()}")
