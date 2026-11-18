@@ -195,7 +195,7 @@ def _quadratic_form(x, A):
     return Q
 
 
-def Gauss_Newton_hessian(h_fun, theta_MAP, Cm, Ctheta):
+def Gauss_Newton_hessian(h_fun, theta_MAP, Cm, Ctheta, W_reg):
     # h_theta returns the solution & the success flag => specify that
     # it returns a pair and only the 1st item is the actual output
     # G_ij = d(h(theta)_i)/dtheta_j
@@ -204,17 +204,18 @@ def Gauss_Newton_hessian(h_fun, theta_MAP, Cm, Ctheta):
     # G^T * Cm^-1 * G = (N_data, N_theta)^T * Cm * (N_data, N_theta)
     # therefore Cm = (N_data, N_data)
     Cm_inv = invert_covariance_matrix(Cm, at_least_2d=True, N=G_MAP.shape[0])
-    H_1 = G_MAP.T @ Cm_inv @ G_MAP
-    H_2 = invert_covariance_matrix(Ctheta, at_least_2d=True, N=theta_MAP.shape[0])
-    H_GN = H_1 + H_2
+    H_data = G_MAP.T @ Cm_inv @ G_MAP
+    Ctheta_inv = invert_covariance_matrix(Ctheta, at_least_2d=True, N=theta_MAP.shape[0])
+    H_theta = Ctheta_inv
+    H_GN = H_data + W_reg*H_theta
     return H_GN
 
 
 def invert_covariance_matrix(C, at_least_2d=False, N=None):
+    C = jnp.asarray(C)
     if C.dim == 0 and at_least_2d and N is None:
         raise ValueError('If C is a scalar and a 2D covariance matrix is required, '
                          'it is mandatory to provide the dimension N of the matrix')
-    C = jnp.asarray(C)
     if C.ndim == 0:
         C_inv = 1 / C
         if at_least_2d:
