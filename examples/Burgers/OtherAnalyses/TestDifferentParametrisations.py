@@ -24,9 +24,11 @@ import MAIN
 
 #%% USER INPUT
 
-DEFAULT_INPUT = Path('setup_FIML/BCDirichlet_steady_nu_u.yaml')
-DEFAULT_OUTPUT = Path('setup_FIML/Burgers_post.yaml')
-SENSITIVITY_DIR = Path('./solution_Burgers') / f'{DEFAULT_INPUT.stem}' / 'sensitivity_test'
+BURGERS_DIR = Path('..')
+
+DEFAULT_INPUT = BURGERS_DIR / 'setup_FIML' / 'BCDirichlet_steady_nu_u.yaml'
+DEFAULT_OUTPUT = BURGERS_DIR / 'setup_FIML' / 'Burgers_post.yaml'
+SENSITIVITY_DIR = BURGERS_DIR / 'solution_Burgers' / f'{DEFAULT_INPUT.stem}' / 'sensitivity_data_variance'
 
 # =============================================================================
 # parametrisations = ['RBF_Gauss_x', 'RBF_Gauss_u',
@@ -35,8 +37,10 @@ SENSITIVITY_DIR = Path('./solution_Burgers') / f'{DEFAULT_INPUT.stem}' / 'sensit
 #                     ]
 # variance_prior = [0.05, 0.1, 0.2, 0.4, 0.8, 1.6]
 # =============================================================================
-parametrisations = ['RBF_Gauss_x', 'RBF_Gauss_u']
-variance_prior = [0.05, 0.1]
+parametrisations = ['RBF_Gauss_x_softplus']
+parameter = {'name': 'variance_observational',
+             'values': [1e-5, 1e-4, 1e-3, 1e-2, 1e-1]
+             }
 # used only if this script is run on Spyder
 ANALYSIS = True
 POST_PROC = False
@@ -59,19 +63,19 @@ def cli(argv=None):
     args = parser.parse_args(argv)
 
     if args.input is not None:
-        return main_analysis(args.input, SENSITIVITY_DIR, parametrisations, variance_prior) 
+        return main_analysis(args.input, SENSITIVITY_DIR, parametrisations, parameter) 
     if args.post is not None:
-        return main_postproc(args.post, SENSITIVITY_DIR, parametrisations, variance_prior)
+        return main_postproc(args.post, SENSITIVITY_DIR, parametrisations, parameter)
     if (args.input, args.post) == (None, None):
         if ANALYSIS:
-            return main_analysis(DEFAULT_INPUT, SENSITIVITY_DIR, parametrisations, variance_prior) 
+            return main_analysis(DEFAULT_INPUT, SENSITIVITY_DIR, parametrisations, parameter) 
         if POST_PROC:
-            return main_postproc(DEFAULT_OUTPUT, SENSITIVITY_DIR, parametrisations, variance_prior)
+            return main_postproc(DEFAULT_OUTPUT, SENSITIVITY_DIR, parametrisations, parameter)
     
 
 # move everything into a function to avoid errors due to parallel execution
 # on Windows
-def main_analysis(INPUT_FILE, SENSITIVITY_DIR, parametrisations, variance_prior):
+def main_analysis(INPUT_FILE, SENSITIVITY_DIR, parametrisations, parameter):
 
     SENSITIVITY_DIR.mkdir(parents=True, exist_ok=True)
     # main input data file, which will be used as template
@@ -83,16 +87,17 @@ def main_analysis(INPUT_FILE, SENSITIVITY_DIR, parametrisations, variance_prior)
     input_template['options']['batch_mode'] = True
     report = PrettyTable()
     report.title = 'Sensitivity study - Analysis'
-    report.field_names = ['Parametrisation'] + [f'Var. prior = {var}' for var in variance_prior]
+    report.field_names = ['Parametrisation'] + [f"{parameter['name']} = {phi}" for phi in parameter['values']]
     for param in parametrisations:
         row_report = [param]
         print(f'----------------- PARAMETRISATION: {param} -----------------')
-        for var_prior in variance_prior:
-            print(f'PRIOR VARIANCE: {var_prior}')
+        for phi in parameter['values']:
+            print(f"{parameter['name'].upper()}: {phi}")
             input_data = deepcopy(input_template)
+            
             input_data['beta']['type'] = param
-            input_data['files']['output_dir'] = str(SENSITIVITY_DIR/f'{param}_varPrior{var_prior}')
-            input_data['variance_prior'] = var_prior
+            out_dir = SENSITIVITY_DIR / f'{param}'
+            input_data = update_input_data(input_data, parameter['name'], phi, out_dir)
             try:
                 MAIN.main(input_data=input_data)
                 status = 'ok'
@@ -137,6 +142,27 @@ def main_postproc(INPUT_FILE, SENSITIVITY_DIR, parametrisations, variance_prior)
             row_report += [status]
         report.add_row(row_report)
     print(report)
+
+
+def update_input_data(input_data, phi_name, phi, out_dir):
+    match phi_name.lower():
+        case 'variance_observational':
+            out_dir = str(out_dir.resolve())
+            input_data['files']['output_dir'] = f'{out_dir}_{phi_name}{phi}'
+            input_data['variance_observational'] = phi
+        case 'variance_prior':
+            out_dir = str(out_dir.resolve())
+            input_data['files']['output_dir'] = f'{out_dir}_{phi_name}{phi}'
+            input_data['variance_prior'] = phi
+        case _:
+            raise ValueError(f"Unknown option '{phi_name}'")
+    
+    # fix file path issues
+    for file in input_data['files']:
+        input_data['files'][file] = str(BURGERS_DIR / input_data['files'][file])
+    
+    return input_data
+
 
 if __name__ == '__main__':
     cli()
