@@ -89,6 +89,13 @@ class RunOptions:
     idx_time_plot: int = -1
     # whether to save the output to a FIML pickled object
     save_FIML_object: bool = True
+    
+    def __post_init__(self):
+        if self.batch_mode:
+            warning('BATCH mode selected, turning off all plot flags...')
+            object.__setattr__(self, 'show_videos', False)
+            object.__setattr__(self, 'check_outputs', False)
+            object.__setattr__(self, 'plot', False)
 
 
 @dataclass(frozen=True, slots=True)

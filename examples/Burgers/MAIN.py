@@ -67,41 +67,22 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
     
     if ANALYSIS:
         if input_data is None:
-            with open(INPUT_FILE, 'r') as file:
-                input_data = yaml.safe_load(file)
-        # safety: use a deep copy of the dictionary to avoid modifying data
-        # of the caller script
-        input_data= deepcopy(input_data)
+            input_obj = fiml.config.Analysis.from_yaml(INPUT_FILE)
+        else:
+            input_obj = fiml.config.Analysis.from_dict(input_data)
         
-        out_dir = input_data['files']['output_dir']
-        if out_dir is not None:
-            out_dir = Path(out_dir)
+        beta_opts = fiml.beta.read_beta_options(input_obj.to_dict()['beta'])
         
-        beta_opts = fiml.beta.read_beta_options(input_data['beta'])
-        
-        N_sampling_prior = int(input_data['num_samples_prior'])
-        N_sampling_post = int(input_data['num_samples_posterior'])
-        
-        SEED = input_data['seed']
-        RUN_PARALLEL = input_data['options']['run_parallel']
-        N_WORKERS = int(input_data['options']['parallel_workers'])
-        CHECK = input_data['options']['check_outputs']
-        VIDEO = input_data['options']['show_videos']
-        BATCH = input_data['options']['batch_mode']
-        hessian_model = input_data['hessian']
-        optimiser_opts = input_data['optimisation']
         
         # for reproducibility: write a copy of the input data
         run_input_file = None
-        if out_dir is not None:
-            out_dir.mkdir(parents=True, exist_ok=True)
-            run_input_file = out_dir / 'input_used.yaml'
-            with open(run_input_file, 'w') as file:
-                yaml.safe_dump(input_data, file)
+        if input_obj.files.output_dir is not None:
+            input_obj.files.output_dir.mkdir(parents=True, exist_ok=True)
+            input_obj.to_yaml(input_obj.files.output_dir / 'input_used.yaml')
         
         
         problem, exp_data, exact_sol, cost_fun_obj = fiml.auxiliaries.read_input_data(
-                                            input_data, mode='analysis', 
+                                            input_obj.to_dict(), mode='analysis', 
                                             solver=solve_Burgers)
         
     
@@ -124,11 +105,8 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
     if POST_PROC:
         return fiml.main.postprocessing(FIML, exp_data, problem, out_dir, sol_exact)
     if ANALYSIS:
-        return fiml.main.analysis(exp_data, problem, out_dir, beta_opts,
-                                  cost_fun_obj, N_sampling_prior, N_sampling_post, SEED,
-                                  N_WORKERS, RUN_PARALLEL, optimiser_opts, CHECK, VIDEO,
-                                  exact_sol, BATCH, IDX_TIME_PLOT=-1, hessian=hessian_model,
-                                  input_file=run_input_file)
+        return fiml.main.analysis(exp_data, problem, cost_fun_obj, beta_opts,
+                                  input_obj, exact_sol, input_file=run_input_file)
 
 if __name__ == '__main__':
     #cli(['--post', str(DEFAULT_OUTPUT)])
