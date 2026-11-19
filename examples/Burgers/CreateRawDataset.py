@@ -48,11 +48,12 @@ beta_vet = {'monotonic_increase': lambda x, t, u, ux, uxx: (1 + 20*u**2 + 2*jnp.
             'cubic': lambda x, t, u, ux, uxx: (2 + 10*u**3 - 10*u**2),
             'oscillating': lambda x, t, u, ux, uxx: (2 + 10*u**3 - 10*u**2)
             }
+N_tot = u0_vet.size * uL_vet.size * nu0_vet.size * len(beta_vet)
 
 
 #%% ------------------ DO NOT TOUCH ANYTHING BELOW THIS LINE ------------------
 
-out_dir = Path('datasets') / Path(cfg.__file__).stem
+out_dir = Path('datasets') / Path(cfg.__file__).stem / 'raw'
 
 out_dir.mkdir(exist_ok=True, parents=True)
 
@@ -83,6 +84,7 @@ t_mesh = jnp.linspace(0, cfg.T, N_t)
 #%% SOLVE THE EQUATION
 
 t0 = timer()
+n = 1
 for u0 in u0_vet:
     for uL in uL_vet:
         # if u0 = uL, the trivial solution u(x) = u0 = uL = cost. is a solution
@@ -91,7 +93,8 @@ for u0 in u0_vet:
             continue
         for beta_name in beta_vet:
             for nu0 in nu0_vet:
-                print(f'u0      : {u0} \n'
+                print(f'Dataset : {n}/{N_tot}\n', 
+                      f'u0      : {u0} \n'
                       f'uL      : {uL} \n'
                       f'nu0     : {nu0} \n'
                       f'beta    : {beta_name}')
@@ -102,11 +105,14 @@ for u0 in u0_vet:
                 sol = sol.at[:,0].set(u0)
                 sol = sol.at[:,-1].set(uL)
     
+                nu0_fun = lambda x, t, u, ux, uxx, nu0=nu0: nu0
                 beta = beta_vet[beta_name]
-                nu = lambda x, t, u, ux, uxx: beta(x, t, u, ux, uxx) * nu0
+                nu = lambda x, t, u, ux, uxx, beta=beta, nu0_fun=nu0_fun: (
+                    beta(x, t, u, ux, uxx) * nu0_fun(x, t, u, ux, uxx)
+                    )
                 
                 start_time = timer()
-                sol, max_res_var_nu = burgers.solve_Burgers(sol, x_mesh, t_mesh, 
+                sol, max_res = burgers.solve_Burgers(sol, x_mesh, t_mesh, 
                                                             nu=nu, STEADY=STEADY)
                 end_time = timer()
                 time_var_nu = end_time - start_time
@@ -155,25 +161,25 @@ for u0 in u0_vet:
                     tmp_set.attrs['description'] = 'Domain length'
                     tmp_set = hdf5_cfg.create_dataset(name='T', data=cfg.T)
                     tmp_set.attrs['description'] = 'Interval duration'
-                    tmp_set = hdf5_cfg.create_dataset(name='u0', data=cfg.u0)
+                    tmp_set = hdf5_cfg.create_dataset(name='u0', data=u0)
                     tmp_set.attrs['description'] = 'Dirichlet boundary condition u(0,t)'
-                    tmp_set = hdf5_cfg.create_dataset(name='uL', data=cfg.uL)
+                    tmp_set = hdf5_cfg.create_dataset(name='uL', data=uL)
                     tmp_set.attrs['description'] = 'Dirichlet boundary condition u(L,t)'
-                    #tmp_set = hdf5_cfg.create_dataset(name='u_IC', data=cloudpickle.dumps(cfg.u_IC))
-                    tmp_set = hdf5_cfg.create_dataset(name='u_IC',
+                    tmp_set = hdf5_cfg.create_dataset(name='u_IC', 
                                                       data=jnp.frombuffer(cloudpickle.dumps(cfg.u_IC), dtype=jnp.uint8))
                     tmp_set.attrs['description'] = 'Initial condition u(x,0)'
-                    tmp_set = hdf5_cfg.create_dataset(name='nu0', data=nu0)
+                    tmp_set = hdf5_cfg.create_dataset(name='nu0',
+                                                      data=jnp.frombuffer(cloudpickle.dumps(nu0_fun), dtype=jnp.uint8))
                     tmp_set.attrs['description'] = 'Constant viscosity (baseline model) nu0'
                     
                     hdf5_exact = file.create_group('exact')
                     tmp_set = hdf5_exact.create_dataset(name='solution', data=sol, **comprex_opts)
                     tmp_set.attrs['description'] = ('Solution of Burgers eq. with variable viscosity, '
                                                     'k-th row is the full solution at time instant t_k')
-                    tmp_set = hdf5_exact.create_dataset(name='max_res', data=max_res_var_nu, **comprex_opts)
+                    tmp_set = hdf5_exact.create_dataset(name='max_res', data=max_res, **comprex_opts)
                     tmp_set.attrs['description'] = 'The k-th row contains the maximum residual for the k-th time instant'
                     tmp_set = hdf5_exact.create_dataset(name='nu',
-                                                        data=jnp.frombuffer(cloudpickle.dumps(cfg.nu), dtype=jnp.uint8))
+                                                        data=jnp.frombuffer(cloudpickle.dumps(nu), dtype=jnp.uint8))
                     tmp_set.attrs['description'] = 'Exact viscosity function nu(x, t, u, ux, uxx)'
                     
                     hdf5_beta = file.create_group('beta')
@@ -201,6 +207,7 @@ for u0 in u0_vet:
                     tmp_set = hdf5_var_nu.create_dataset(name='solution', data=sol_probes, **comprex_opts)
                     tmp_set.attrs['description'] = 'Sampled solution of exact problem'
                 
+                n += 1
 # =============================================================================
 #                 plt.figure()
 #                 plt.plot(x_mesh, sol[-1,:])

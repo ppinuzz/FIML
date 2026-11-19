@@ -6,12 +6,12 @@ mamba create --name FIML python=3.13.2 numpy=2.2.4 matplotlib=3.10.1 prettytable
 ```
 Install JAX and Optax separately with (on Windows)
 ```
-pip install -U jax
-pip install optax
+pip install -U jax=0.11.2
+pip install optax=0.2.8
 ```
 On Linux, just use
 ```
-mamba install jaxlib
+mamba install jaxlib=0.11.2 optax=0.2.8
 ```
 
 ## $\beta$ model available
@@ -22,7 +22,7 @@ mamba install jaxlib
 
 - `BxBt_exp`: exponentiated version of `BxBt`
 ```math
-\beta(x,t) = e^z > 0
+\beta(x,t) = \beta_\mathrm{ref} e^z > 0
 ```
 
 - `BxBt_softplus`: smoothened version of `BxBt` using the softplus function $s(z) = \ln(1 + e^z)$
@@ -38,7 +38,7 @@ where $0 \le \beta_\mathrm{min} 1 1$ is a minimum value that can be imposed. Wit
 
 - `RBF_Gauss_u`: same, but depending on the solution $u$, not on the independent coordinate $x$
 ```math
-\beta(u) = \beta_\mathrm{ref} + \sum_{k=1}^W \phi_k(u) w_k = \sum_{k=1}^W \exp(-K(u-u_{\mathrm{c},k})^2) w_k \gtreqless 0
+\beta(u) = \beta_\mathrm{ref} + \sum_{k=1}^W \phi_k(u) w_k = \beta_\mathrm{ref} + \sum_{k=1}^W \exp(-K(u-u_{\mathrm{c},k})^2) w_k \gtreqless 0
 ```
 the centre of each RBF is the solution at a fixed space position: $u_{\mathrm{c},k} = u(x_k)$
 
@@ -50,4 +50,14 @@ the centre of each RBF is the solution at a fixed space position: $u_{\mathrm{c}
 - `RBF_Gauss_u_softplus`: same as `RBF_Gauss_u`, but the positivity-preserving function $G(z; \beta_\mathrm{min})$ is applied to the $\beta$ obtained by `RBF_Gauss_u`
 ```math
 \beta(x) = G\bigg(\sum_{k=1}^W \phi_k(u) w_k; \beta_\mathrm{min} \bigg) = G\bigg(\sum_{k=1}^W \exp(-K(u-u_{\mathrm{c},k})^2) w_k; \beta_\mathrm{min} \bigg) > 0
+```
+
+- `RBF_Gauss_x_poly`: same as `RBF_Gauss_x`, but with the addition of polynomial terms
+```math
+\beta(x) = \beta_\mathrm{ref} + \sum_{k=1}^W \phi_k(x) w_k + \sum_{p=1}^P x^{d_p} \eta_p = \beta_\mathrm{ref} + \sum_{k=1}^W \exp(-K(x-c_k)^2) w_k \gtreqless 0
+```
+
+- `RBF_Gauss_x_poly_softplus`: same as `RBF_Gauss_x_poly`, but with the positivity-preserving function $G(z; \beta_\mathrm{min})$
+```math
+\beta(x) = G\bigg(\sum_{k=1}^W \phi_k(x) w_k + \sum_{p=1}^P x^{d_p} \eta_p; \beta_\mathrm{min}\bigg) \gtreqless 0
 ```
