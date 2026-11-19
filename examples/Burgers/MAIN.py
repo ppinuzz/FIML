@@ -73,7 +73,9 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
         # of the caller script
         input_data= deepcopy(input_data)
         
-        out_dir = Path(input_data['files']['output_dir'])
+        out_dir = input_data['files']['output_dir']
+        if out_dir is not None:
+            out_dir = Path(out_dir)
         
         beta_opts = fiml.beta.read_beta_options(input_data['beta'])
         
@@ -90,10 +92,12 @@ def main(INPUT_FILE=None, OUTPUT_FILE=None, input_data=None, output_data=None):
         optimiser_opts = input_data['optimisation']
         
         # for reproducibility: write a copy of the input data
-        out_dir.mkdir(parents=True, exist_ok=True)
-        run_input_file = out_dir / 'input_used.yaml'
-        with open(run_input_file, 'w') as file:
-            yaml.safe_dump(input_data, file)
+        run_input_file = None
+        if out_dir is not None:
+            out_dir.mkdir(parents=True, exist_ok=True)
+            run_input_file = out_dir / 'input_used.yaml'
+            with open(run_input_file, 'w') as file:
+                yaml.safe_dump(input_data, file)
         
         
         problem, exp_data, exact_sol, cost_fun_obj = fiml.auxiliaries.read_input_data(

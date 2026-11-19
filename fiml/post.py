@@ -251,7 +251,7 @@ def compare_exact_beta(sol_objs, exact_sol, t_plot=None, fig_file=None,
         
         
 
-def compare_prior_posterior(prior, post, exp, MAP=None, ax_sol=2, N_sigma=2, t_plot=None, 
+def compare_prior_posterior(prior, post=None, exp=None, MAP=None, ax_sol=2, N_sigma=2, t_plot=None, 
                             fig_file=None, PLOT=True, VIDEO=False):
     
     if ~jnp.all(jnp.isclose(prior.x, post.x)):
@@ -267,10 +267,11 @@ def compare_prior_posterior(prior, post, exp, MAP=None, ax_sol=2, N_sigma=2, t_p
         prior_sol = prior.solution[jnp.newaxis, ...]
     else:
         prior_sol = prior.solution
-    if post.solution.ndim != 3:
-        posterior_sol = post.solution[jnp.newaxis, ...]
-    else:
-        posterior_sol = post.solution
+    if post is not None:
+        if post.solution.ndim != 3:
+            posterior_sol = post.solution[jnp.newaxis, ...]
+        else:
+            posterior_sol = post.solution
     # for each space-time point, calculate the sample mean of the solutions
     # obtained solving the equation for each sample
     # (1st index: space, 2nd index: time, 3rd index: sampling)
@@ -279,10 +280,11 @@ def compare_prior_posterior(prior, post, exp, MAP=None, ax_sol=2, N_sigma=2, t_p
     u_upper_prior = u_mean_prior + N_sigma*u_sigma_prior
     u_lower_prior = u_mean_prior - N_sigma*u_sigma_prior
     
-    u_mean_post = jnp.mean(posterior_sol, axis=ax_sol)
-    u_sigma_post = jnp.std(posterior_sol, axis=ax_sol)
-    u_upper_post = u_mean_post + N_sigma*u_sigma_post
-    u_lower_post = u_mean_post - N_sigma*u_sigma_post
+    if post is not None:
+        u_mean_post = jnp.mean(posterior_sol, axis=ax_sol)
+        u_sigma_post = jnp.std(posterior_sol, axis=ax_sol)
+        u_upper_post = u_mean_post + N_sigma*u_sigma_post
+        u_lower_post = u_mean_post - N_sigma*u_sigma_post
     
     # if no time instant to plot is given, the last one is assumed
     # (where discrepancy is likely to be the biggest)
@@ -303,17 +305,19 @@ def compare_prior_posterior(prior, post, exp, MAP=None, ax_sol=2, N_sigma=2, t_p
     u_mean_prior_exp = aux.sample_solution(u_mean_prior, t_mesh=t, t_probes=t_exp_plot)
     u_upper_prior_exp = aux.sample_solution(u_upper_prior, t_mesh=t, t_probes=t_exp_plot)
     u_lower_prior_exp = aux.sample_solution(u_lower_prior, t_mesh=t, t_probes=t_exp_plot)
-    u_mean_post_exp = aux.sample_solution(u_mean_post, t_mesh=t, t_probes=t_exp_plot)
-    u_upper_post_exp = aux.sample_solution(u_upper_post, t_mesh=t, t_probes=t_exp_plot)
-    u_lower_post_exp = aux.sample_solution(u_lower_post, t_mesh=t, t_probes=t_exp_plot)
+    if post is not None:
+        u_mean_post_exp = aux.sample_solution(u_mean_post, t_mesh=t, t_probes=t_exp_plot)
+        u_upper_post_exp = aux.sample_solution(u_upper_post, t_mesh=t, t_probes=t_exp_plot)
+        u_lower_post_exp = aux.sample_solution(u_lower_post, t_mesh=t, t_probes=t_exp_plot)
     
     if PLOT:
         fig = plt.figure()
         plt.plot(x, u_mean_prior_exp, label='Prior', color='r')
         plt.fill_between(x, u_upper_prior_exp, u_lower_prior_exp, alpha=0.3, color='r')
         
-        plt.plot(post.x, u_mean_post_exp, label='Posterior', color='b')
-        plt.fill_between(post.x, u_upper_post_exp, u_lower_post_exp, alpha=0.3, color='b')
+        if post is not None:
+            plt.plot(post.x, u_mean_post_exp, label='Posterior', color='b')
+            plt.fill_between(post.x, u_upper_post_exp, u_lower_post_exp, alpha=0.3, color='b')
         
         if MAP is not None:
             u_MAP = aux.sample_solution(MAP.solution, t_mesh=MAP.t, t_probes=t_exp_plot)

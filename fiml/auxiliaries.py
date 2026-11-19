@@ -437,7 +437,12 @@ def _read_analysis_input(input_data, exact_sol_file, exp_data_file, solver):
               # HDF5 dataset object -> NumPy array -> lambda function
               'u_IC': cloudpickle.loads(jnp.asarray(file['settings']['u_IC']))
               }
-        nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
+        # HACK: change the way data are stored in CreateRawData to remove this
+        # hacky if-else
+        if 'baseline' in file:
+            nu = cloudpickle.loads(jnp.asarray(file['baseline']['nu']))
+        else:
+            nu = cloudpickle.loads(jnp.asarray(file['settings']['nu0']))
         
         beta = file['beta']['beta'][:] if 'beta' in file.keys() else None
         exact_sol = objs.ExactSolution(x=file['mesh']['x'][:],

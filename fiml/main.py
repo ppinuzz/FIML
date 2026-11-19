@@ -409,39 +409,52 @@ def analysis(exp_data, problem, out_dir, beta_opts, cost_fun_obj,
     
     #%% EVALUATE A-POSTERIORI DISTRIBUTION
     
-    print(f'Drawing {N_sampling_post} samples of the {N_theta}-components theta vector a-posteriori...')
-    key_random = aux.generate_key(SEED)
-    theta_post_samples = fiml.posterior_sampling(FIML.MAP.theta, FIML.MAP.covariance, N_sampling_post, key_random)
-    
-    FIML.posterior = fiml.launch_sampling(
-                        theta_post_samples, run_solver_case, problem.solver_fun, 
-                        N_x, N_t, N_sampling_post, problem.solver_args(beta_fun),
-                        RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
-    FIML.posterior.key_random = jax.random.key_data(key_random)
-    FIML.posterior.x = problem.x_mesh
-    FIML.posterior.t = problem.t_mesh
-    
-    aux.save_sampling(out_file, 'posterior', comprex_opts, FIML.posterior, save_failed_runs=True)
-    if FIML.posterior.N_valid == 0:
-        raise RuntimeError('All simulations failed during posterior sampling, '
-                           'no data to evaluate posterior distribution')
+    if N_sampling_post > 0:
+        print(f'Drawing {N_sampling_post} samples of the {N_theta}-components theta vector a-posteriori...')
+        key_random = aux.generate_key(SEED)
+        theta_post_samples = fiml.posterior_sampling(FIML.MAP.theta, FIML.MAP.covariance, N_sampling_post, key_random)
+        
+        FIML.posterior = fiml.launch_sampling(
+                            theta_post_samples, run_solver_case, problem.solver_fun, 
+                            N_x, N_t, N_sampling_post, problem.solver_args(beta_fun),
+                            RUN_PARALLEL=RUN_PARALLEL, N_WORKERS=N_WORKERS)
+        FIML.posterior.key_random = jax.random.key_data(key_random)
+        FIML.posterior.x = problem.x_mesh
+        FIML.posterior.t = problem.t_mesh
+        
+        aux.save_sampling(out_file, 'posterior', comprex_opts, FIML.posterior, save_failed_runs=True)
+        if FIML.posterior.N_valid == 0:
+            raise RuntimeError('All simulations failed during posterior sampling, '
+                               'no data to evaluate posterior distribution')
+    else:
+        aux.warning('N_sampling_post <= 0, skipping posterior sampling')
     
     
     #%% CHECK POSTERIOR DISTRIBUTION AROUND MAP POINT
     
-    post.check_experiments_in_sigma_band(FIML.posterior, exp_data, N_sigma=2, 
-                                         t_plot=exp_data.t[IDX_TIME_PLOT], 
-                                         fig_file=out_dir/'meanSigmaExpPosterior', PLOT=PLOT)
-    
-    post.compare_prior_posterior(FIML.prior, FIML.posterior, exp_data, MAP=FIML.MAP,
-                                 N_sigma=2, t_plot=exp_data.t[IDX_TIME_PLOT], 
-                                 fig_file=out_dir/'priorVSposterior', PLOT=PLOT)
-    
-    # see how beta correction has improved from prior to posterior
-    if CHECK and exact_sol is not None:
-        post.compare_exact_beta((FIML.prior, FIML.MAP, FIML.posterior), exact_sol, 
-                                t_plot=exact_sol.t[-1], fig_file=out_dir/'checkBeta', 
-                                PLOT=PLOT, VIDEO=VIDEO, beta_labels=('Prior', 'MAP', 'Posterior'))
+    if N_sampling_post > 0:
+        post.check_experiments_in_sigma_band(FIML.posterior, exp_data, N_sigma=2, 
+                                             t_plot=exp_data.t[IDX_TIME_PLOT], 
+                                             fig_file=out_dir/'meanSigmaExpPosterior', PLOT=PLOT)
+        
+        post.compare_prior_posterior(FIML.prior, FIML.posterior, exp_data, MAP=FIML.MAP,
+                                     N_sigma=2, t_plot=exp_data.t[IDX_TIME_PLOT], 
+                                     fig_file=out_dir/'priorVSposterior', PLOT=PLOT)
+        
+        # see how beta correction has improved from prior to posterior
+        if CHECK and exact_sol is not None:
+            post.compare_exact_beta((FIML.prior, FIML.MAP, FIML.posterior), exact_sol, 
+                                    t_plot=exact_sol.t[-1], fig_file=out_dir/'checkBeta', 
+                                    PLOT=PLOT, VIDEO=VIDEO, beta_labels=('Prior', 'MAP', 'Posterior'))
+    else:
+        post.compare_prior_posterior(FIML.prior, None, exp_data, MAP=FIML.MAP,
+                                     N_sigma=2, t_plot=exp_data.t[IDX_TIME_PLOT], 
+                                     fig_file=out_dir/'priorVSposterior', PLOT=PLOT)
+        
+        if CHECK and exact_sol is not None:
+            post.compare_exact_beta((FIML.prior, FIML.MAP), exact_sol, 
+                                    t_plot=exact_sol.t[-1], fig_file=out_dir/'checkBeta', 
+                                    PLOT=PLOT, VIDEO=VIDEO, beta_labels=('Prior', 'MAP'))
     
     
     #%% CLOSE HDF5 FILE

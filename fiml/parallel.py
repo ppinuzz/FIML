@@ -6,6 +6,7 @@ Utilities to manage parallel execution of the code.
 
 import fiml.auxiliaries as aux
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import multiprocessing as mp
 import cloudpickle
 import jax
 jax.config.update('jax_enable_x64', True)
@@ -32,7 +33,10 @@ def run_parallel(N_workers, theta, run_solver_case, solution, residuals, success
     # global variable, so that all the jobs handled by the i-th worker have
     # access to those => same function objects beta and nu (which, if parametrised,
     # depend solely on the array of parameters) => no need to recompile anything
+    # 3) 'spawn' is the default method to create a new process on Windows, not 
+    # on Linux => specify it for OS-compatibility
     with ProcessPoolExecutor(max_workers=N_workers, initializer=_initialise_worker,
+                             mp_context=mp.get_context('spawn'),
                              initargs=(serialised_args, )) as executor:
         job_handles = {}
         for r, theta_r in enumerate(theta):
