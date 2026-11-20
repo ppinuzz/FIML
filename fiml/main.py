@@ -103,7 +103,7 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
     return run_id, solution, max_res, success
 
 
-def analysis(exp_data, problem, cost_fun_obj, beta_opts, analysis_obj, 
+def field_inversion(exp_data, problem, cost_fun_obj, beta_opts, analysis_obj, 
              exact_sol=None, input_file=None):
     
     optimiser_opts = analysis_obj.to_dict()['optimisation']
@@ -489,6 +489,10 @@ def analysis(exp_data, problem, cost_fun_obj, beta_opts, analysis_obj,
                 cloudpickle.dump(FIML, file)
     
     return FIML
+
+
+def machine_learning(FIML):
+    pass
 
 
 
