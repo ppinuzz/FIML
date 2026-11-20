@@ -36,13 +36,18 @@ N_probes = 40
 import setup_Burgers.BCDirichlet_steady_nu_u as cfg
 
 # =============================================================================
-# u0_vet = jnp.array([-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2])
-# uL_vet = jnp.array([-2, -1.5, -1, -0.5, 0, 0.5, 1, 1.5, 2])
-# nu0_vet = jnp.array([1e-3, 5e-3, 1e-2, 5e-2, 1e-1, 5e-1])
+# u0_vet = jnp.array([-2, -1, 0, 0.5, 1, 2])
+# uL_vet = jnp.array([-2, -1, 0, 0.5, 1, 2])
+# nu0_vet = jnp.array([1e-3, 1e-2, 1e-1])
+# beta_vet = {'monotonic_increase': lambda x, t, u, ux, uxx: (1 + 20*u**2 + 2*jnp.sin(u)),
+#             'downward_parabola': lambda x, t, u, ux, uxx: (1 - 50*u**2 + 55*u),
+#             'cubic': lambda x, t, u, ux, uxx: (2 + 10*u**3 - 10*u**2),
+#             'oscillating': lambda x, t, u, ux, uxx: (2 + 10*u**3 - 10*u**2)
+#             }
 # =============================================================================
-u0_vet = jnp.array([-2, -1, 0, 0.5, 1, 2])
-uL_vet = jnp.array([-2, -1, 0, 0.5, 1, 2])
-nu0_vet = jnp.array([1e-3, 1e-2, 1e-1])
+u0_vet = jnp.array([0, 0.5, 1, 1.5, 2])
+uL_vet = jnp.array([0, 0.5, 1, 1.5, 2])
+nu0_vet = jnp.array([1e-3, 5e-3, 1e-2])
 beta_vet = {'monotonic_increase': lambda x, t, u, ux, uxx: (1 + 20*u**2 + 2*jnp.sin(u)),
             'downward_parabola': lambda x, t, u, ux, uxx: (1 - 50*u**2 + 55*u),
             'cubic': lambda x, t, u, ux, uxx: (2 + 10*u**3 - 10*u**2),
@@ -131,7 +136,9 @@ for u0 in u0_vet:
                 ux = ux.at[:, -1].set(
                         (3*sol[:, -1] - 4*sol[:, -2] + sol[:, -3]) / (2*dx)
                     )
-                beta_eval = jax.vmap(lambda t, u, ux_t: beta(x_mesh, t, u, ux_t, None)
+                beta_eval = jax.vmap(lambda t, u, ux_t: beta(x_mesh, t, u, ux_t, None),
+                                     # make sure it has shape (Nx, Nt)
+                                     in_axes=0, out_axes=1
                                      )(t_mesh, sol, ux)
     
     
