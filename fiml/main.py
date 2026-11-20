@@ -491,8 +491,17 @@ def field_inversion(exp_data, problem, cost_fun_obj, beta_opts, analysis_obj,
     return FIML
 
 
-def machine_learning(FIML):
-    pass
+def machine_learning(input_obj):
+    
+    # OUTPUT DATA FILE
+    out_filename = input_obj.files.output_dir / 'output.h5'
+    # common compression options
+    # shuffle: allows blocks to be moved around, possible memory gain
+    # gzip: most portable and fairly fast
+    # compression_opts: for GZIP, it's the compressione level (9: maximum)
+    comprex_opts = {'shuffle': True, 'compression': 'gzip', 'compression_opts': 9}
+    with h5py.File(out_filename, 'w') as out_file:
+        pass
 
 
 

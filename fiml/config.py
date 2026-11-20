@@ -126,8 +126,7 @@ class FieldInversion:
     # like 'self' does)
     @classmethod
     def from_dict(cls, input_data: dict) -> 'FieldInversion':
-        field_inv_data = input_data['field_inversion']
-        beta_data = dict(field_inv_data.get('beta') or {})
+        beta_data = dict(input_data.get('beta') or {})
         # for safety, convert YAML lists to tuples
         if 'poly_degrees_bases' in beta_data:
             beta_data['poly_degrees_bases'] = tuple(beta_data['poly_degrees_bases'])
@@ -137,12 +136,12 @@ class FieldInversion:
         # groups of options present also in the YAML file
         yaml_groups = {'files', 'mesh', 'beta', 'optimisation', 'options'}
         # other groups
-        other_other = {key: value for key, value in field_inv_data.items() if key not in yaml_groups}
-        return cls(files=FilesFI(**field_inv_data['files']),
-                   mesh=Mesh(**(field_inv_data.get('mesh') or {})),
+        other_other = {key: value for key, value in input_data.items() if key not in yaml_groups}
+        return cls(files=FilesFI(**input_data['files']),
+                   mesh=Mesh(**(input_data.get('mesh') or {})),
                    beta=Beta(**beta_data),
-                   optimisation=Optimisation(**(field_inv_data.get('optimisation') or {})),
-                   options=RunOptions(**(field_inv_data.get('options') or {})),
+                   optimisation=Optimisation(**(input_data.get('optimisation') or {})),
+                   options=RunOptions(**(input_data.get('options') or {})),
                    **other_other,
                    )
     @classmethod
@@ -180,7 +179,7 @@ class FilesML:
         object.__setattr__(self, 'output_dir', Path(self.output_dir))
         if self.test_data is not None:
             object.__setattr__(self, 'test_data', Path(self.test_data))
-
+    
 
 @dataclass(frozen=True, slots=True)
 class GaussianProcess:
@@ -199,13 +198,12 @@ class MachineLearning:
     # like 'self' does)
     @classmethod
     def from_dict(cls, input_data: dict) -> 'MachineLearning':
-        field_inv_data = input_data['machine_learning']
         # groups of options present also in the YAML file
         yaml_groups = {'files', 'gaussian_process'}
         # other groups
-        other_groups = {key: value for key, value in field_inv_data.items() if key not in yaml_groups}
-        return cls(files=FilesML(**field_inv_data['files']),
-                   ML=GaussianProcess(**field_inv_data['gaussian_process']),
+        other_groups = {key: value for key, value in input_data.items() if key not in yaml_groups}
+        return cls(files=FilesML(**input_data['files']),
+                   ML=GaussianProcess(**input_data['gaussian_process']),
                    #options=RunOptions(**(field_inv_data.get('options') or {})),
                    **other_groups,
                    )
@@ -213,7 +211,7 @@ class MachineLearning:
     def from_yaml(cls, input_file: str | Path) -> 'MachineLearning':
         with open(input_file) as file:
             input_data = yaml.safe_load(file)
-        return cls.from_dict(input_data)
+        return cls.from_dict(input_data['machine_learning'])
 
     def to_dict(self) -> dict:
         return asdict(self)

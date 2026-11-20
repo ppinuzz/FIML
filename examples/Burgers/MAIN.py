@@ -39,7 +39,7 @@ def run_field_inversion(input_file=None, input_data=None):
     if input_file is not None:
         input_obj = fiml.config.FieldInversion.from_yaml(input_file)
     else:
-        input_obj = fiml.config.FieldInversion.from_dict(deepcopy(input_data))
+        input_obj = fiml.config.FieldInversion.from_dict(input_data)
 
     # some functions still require dictionaries, not classes
     input_obj_dict = input_obj.to_dict()
@@ -55,7 +55,7 @@ def run_field_inversion(input_file=None, input_data=None):
 
     problem, exp_data, exact_sol, cost_fun_obj = fiml.auxiliaries.read_input_data(
                                                     input_obj_dict, 
-                                                    mode='analysis', 
+                                                    mode='field_inversion', 
                                                     solver=solve_Burgers)
     FI_obj = fiml.main.field_inversion(exp_data, problem, cost_fun_obj, beta_opts,
                                        input_obj, exact_sol, 
@@ -73,7 +73,7 @@ def run_machine_learning(input_file=None, input_data=None):
     if input_file is not None:
         input_obj = fiml.config.MachineLearning.from_yaml(input_file)
     else:
-        input_obj = fiml.config.MachineLearning.from_dict(deepcopy(input_data))
+        input_obj = fiml.config.MachineLearning.from_dict(input_data)
     
     # for reproducibility: write a copy of the input data
     run_input_file = None

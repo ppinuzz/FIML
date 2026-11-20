@@ -38,6 +38,7 @@ FIML_dataset = dataset_out_dir / 'FIML_dataset.h5'
 def main():
     with open(setup_file, 'r') as file:
         input_template = yaml.safe_load(file)
+        input_template = input_template['field_inversion']
     
     # (?P<u0>...)   named capture groupd with name 'u0'
     pattern = re.compile(
@@ -97,7 +98,7 @@ def main():
         if failed:
             print('FAILED SIMULATIONS: u0, uL, nu0, name')
             for run in failed:
-                print(f'{failed[0]:<5}, {failed[1]:<5}, {failed[2]:<5}, {failed[3]}')
+                print(f'{run[0]:<5}, {run[1]:<5}, {run[2]:<5}, {run[3]}')
 
 if __name__ == '__main__':
     main()

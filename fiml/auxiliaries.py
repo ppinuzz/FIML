@@ -408,15 +408,17 @@ def read_input_data(input_obj, mode, solver=None):
     input_data = _read_file_or_obj(input_obj, msg='input file')
     
     match mode.lower():
-        case 'analysis':
-            return _read_analysis_input(input_data, input_data['files']['solution'], input_data['files']['data'], solver)
+        case 'field_inversion':
+            return _read_field_inversion_input(input_data, input_data['files']['solution'], input_data['files']['data'], solver)
         case 'postprocessing':
             return _read_postproc_input(input_data, input_data['FIML_file'], input_data['exact_solution_file'], input_data['data_file'])
+        case 'machine_learning':
+            return _read_machine_learning_input(input_data, input_data['files']['training_data'], input_data['files']['test_data'])
         case _:
             raise ValueError("Missing or invalid mode: either 'analysis' or 'postprocessing'")
 
 
-def _read_analysis_input(input_data, exact_sol_file, exp_data_file, solver):
+def _read_field_inversion_input(input_data, exact_sol_file, exp_data_file, solver):
     
     exp_data_file = Path(exp_data_file)
     print(f'Reading experimental data from \n\t{exp_data_file.resolve()}')
@@ -510,6 +512,19 @@ def _read_postproc_input(output_data, FIML_file, exact_sol_file, exp_data_file=N
     _print_dict(output_data)
     
     return FIML.problem, exact_sol, exp_data, FIML
+
+
+def _read_machine_learning_input(train_data, test_data=None):
+    print(f'Reading training data from \n\t{train_data.resolve()}')
+    with h5py.File(train_data, 'r') as file:
+        # obj       h5py.Dataset object, vanishes once file is closed
+        # obj[:]    numpy.ndarray, read the entire array, breaks if the
+        #           data stored in dataset[key] is a scalar 
+        # obj[()]   numpy.ndarray or scalar, read whatever's in the database
+        FI_objs = train_data['g']
+        exp_data = objs.ExperimentalData(x=file['probes']['x'][:],
+                                         t=file['probes']['t'][:],
+                                         solution=file['exact']['solution'][:])
 
 
 

@@ -257,6 +257,11 @@ class FieldInversionObject:
 
 
 @dataclass
+class DataML:
+    training: tuple[MAPResult]
+    test: tuple[MAPResult] | None = None
+
+
+@dataclass
 class MachineLearningObject:
-    field_inv: FieldInversionObject | None
-    
+    data: DataML
