@@ -141,7 +141,7 @@ class MAPResult:
     opt: dict
     jacobian: jax.Array | None = None
     hessian: jax.Array | None = None
-    # posterior covariance matrix, approx. as C_theta = H(theta_MAP) in [Parish2016]
+    # posterior covariance matrix, approx. as C_theta = H^-1(theta_MAP) in [Parish2016]
     covariance: jax.Array | None = None
 
 

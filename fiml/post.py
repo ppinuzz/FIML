@@ -254,12 +254,11 @@ def compare_exact_beta(sol_objs, exact_sol, t_plot=None, fig_file=None,
 def compare_prior_posterior(prior, post=None, exp=None, MAP=None, ax_sol=2, N_sigma=2, t_plot=None, 
                             fig_file=None, PLOT=True, VIDEO=False):
     
-    if ~jnp.all(jnp.isclose(prior.x, post.x)):
-        raise ValueError('Spatial mesh of prior and posterior samples are different')
-    if ~jnp.all(jnp.isclose(prior.t, post.t)):
-        raise ValueError('Time mesh of prior and posterior samples are different')
-    x = prior.x
-    t = prior.t
+    if post is not None:
+        if ~jnp.all(jnp.isclose(prior.x, post.x)):
+            raise ValueError('Spatial mesh of prior and posterior samples are different')
+        if ~jnp.all(jnp.isclose(prior.t, post.t)):
+            raise ValueError('Time mesh of prior and posterior samples are different')
     
     # HACK: assicurati nel solver the la dimensione sia (Nt, Nx, N_sample),
     # non qui
@@ -302,18 +301,18 @@ def compare_prior_posterior(prior, post=None, exp=None, MAP=None, ax_sol=2, N_si
     # actual time instant plotted 
     t_exp_plot = exp.t[idx_plot_exp]
     # interpolate numerical solution at that time instant
-    u_mean_prior_exp = aux.sample_solution(u_mean_prior, t_mesh=t, t_probes=t_exp_plot)
-    u_upper_prior_exp = aux.sample_solution(u_upper_prior, t_mesh=t, t_probes=t_exp_plot)
-    u_lower_prior_exp = aux.sample_solution(u_lower_prior, t_mesh=t, t_probes=t_exp_plot)
+    u_mean_prior_exp = aux.sample_solution(u_mean_prior, t_mesh=prior.t, t_probes=t_exp_plot)
+    u_upper_prior_exp = aux.sample_solution(u_upper_prior, t_mesh=prior.t, t_probes=t_exp_plot)
+    u_lower_prior_exp = aux.sample_solution(u_lower_prior, t_mesh=prior.t, t_probes=t_exp_plot)
     if post is not None:
-        u_mean_post_exp = aux.sample_solution(u_mean_post, t_mesh=t, t_probes=t_exp_plot)
-        u_upper_post_exp = aux.sample_solution(u_upper_post, t_mesh=t, t_probes=t_exp_plot)
-        u_lower_post_exp = aux.sample_solution(u_lower_post, t_mesh=t, t_probes=t_exp_plot)
+        u_mean_post_exp = aux.sample_solution(u_mean_post, t_mesh=post.t, t_probes=t_exp_plot)
+        u_upper_post_exp = aux.sample_solution(u_upper_post, t_mesh=post.t, t_probes=t_exp_plot)
+        u_lower_post_exp = aux.sample_solution(u_lower_post, t_mesh=post.t, t_probes=t_exp_plot)
     
     if PLOT:
         fig = plt.figure()
-        plt.plot(x, u_mean_prior_exp, label='Prior', color='r')
-        plt.fill_between(x, u_upper_prior_exp, u_lower_prior_exp, alpha=0.3, color='r')
+        plt.plot(prior.x, u_mean_prior_exp, label='Prior', color='r')
+        plt.fill_between(prior.x, u_upper_prior_exp, u_lower_prior_exp, alpha=0.3, color='r')
         
         if post is not None:
             plt.plot(post.x, u_mean_post_exp, label='Posterior', color='b')

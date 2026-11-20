@@ -103,26 +103,6 @@ def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh,
     return run_id, solution, max_res, success
 
 
-
-# =============================================================================
-# fiml.main.analysis(input_obj.files.output_dir, beta_opts,
-#                           input_obj.num_samples_prior,
-#                           input_obj.num_samples_posterior, input_obj.seed,
-#                           input_obj.options.parallel_workers,
-#                           input_obj.options.run_parallel,
-#                           input_obj.to_dict()['optimisation'],
-#                           input_obj.options.check_outputs,
-#                           input_obj.options.show_videos,
-#                           exact_sol, input_obj.options.batch_mode, 
-#                           IDX_TIME_PLOT=input_obj.options.idx_time_plot,
-#                           hessian=input_obj.hessian,
-#                           input_file=run_input_file,
-#                           save_FIML=input_obj.options.save_FIML_object)
-# =============================================================================
-
-
-
-
 def analysis(exp_data, problem, cost_fun_obj, beta_opts, analysis_obj, 
              exact_sol=None, input_file=None):
     

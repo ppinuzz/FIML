@@ -213,7 +213,7 @@ def Gauss_Newton_hessian(h_fun, theta_MAP, Cm, Ctheta, W_reg):
 
 def invert_covariance_matrix(C, at_least_2d=False, N=None):
     C = jnp.asarray(C)
-    if C.dim == 0 and at_least_2d and N is None:
+    if C.ndim == 0 and at_least_2d and N is None:
         raise ValueError('If C is a scalar and a 2D covariance matrix is required, '
                          'it is mandatory to provide the dimension N of the matrix')
     if C.ndim == 0:

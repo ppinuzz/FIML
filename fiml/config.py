@@ -115,6 +115,12 @@ class Analysis:
     seed: int | None = None
     hessian: str = 'full'
 
+    def __post__init(self):
+        if self.num_samples_prior <= 0:
+            raise ValueError('The number of prior samples must be > 0')
+        if self.num_samples_posterior <= 0:
+            warning('Number of posterior samples set to 0, skipping posterior sampling...')
+
     # declared as a class method => takes cls in input, not self
     # ('cls' referes to the class in itself, as a blueprint, not to the instance,
     # like 'self' does)
