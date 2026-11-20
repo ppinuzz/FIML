@@ -254,3 +254,9 @@ class FieldInversionObject:
 
     def __post_init__(self):
         self.N_params = self.beta_params['N_params']
+
+
+@dataclass
+class MachineLearningObject:
+    field_inv: FieldInversionObject | None
+    

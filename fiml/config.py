@@ -13,7 +13,7 @@ from fiml.auxiliaries import warning
 # frozen=True   dataclass attributes cannot be modified (e.g. rewriting a value)
 # slots=True    new attributes outside of those defined here cannot be created
 @dataclass(frozen=True, slots=True)
-class Files:
+class FilesFI:
     # experimental data file
     data: str | Path
     output_dir: str | Path
@@ -99,10 +99,10 @@ class RunOptions:
 
 
 @dataclass(frozen=True, slots=True)
-class Analysis:
+class FieldInversion:
     variance_prior: float | str
     variance_observational: float | str
-    files: Files
+    files: FilesFI
     # create a new Mesh instance if no value is supplied
     mesh: Mesh = field(default_factory=Mesh)
     beta: Beta = field(default_factory=Beta)
@@ -125,8 +125,9 @@ class Analysis:
     # ('cls' referes to the class in itself, as a blueprint, not to the instance,
     # like 'self' does)
     @classmethod
-    def from_dict(cls, input_data: dict) -> 'Analysis':
-        beta_data = dict(input_data.get('beta') or {})
+    def from_dict(cls, input_data: dict) -> 'FieldInversion':
+        field_inv_data = input_data['field_inversion']
+        beta_data = dict(field_inv_data.get('beta') or {})
         # for safety, convert YAML lists to tuples
         if 'poly_degrees_bases' in beta_data:
             beta_data['poly_degrees_bases'] = tuple(beta_data['poly_degrees_bases'])
@@ -136,19 +137,19 @@ class Analysis:
         # groups of options present also in the YAML file
         yaml_groups = {'files', 'mesh', 'beta', 'optimisation', 'options'}
         # other groups
-        other_other = {key: value for key, value in input_data.items() if key not in yaml_groups}
-        return cls(files=Files(**input_data['files']),
-                   mesh=Mesh(**(input_data.get('mesh') or {})),
+        other_other = {key: value for key, value in field_inv_data.items() if key not in yaml_groups}
+        return cls(files=FilesFI(**field_inv_data['files']),
+                   mesh=Mesh(**(field_inv_data.get('mesh') or {})),
                    beta=Beta(**beta_data),
-                   optimisation=Optimisation(**(input_data.get('optimisation') or {})),
-                   options=RunOptions(**(input_data.get('options') or {})),
+                   optimisation=Optimisation(**(field_inv_data.get('optimisation') or {})),
+                   options=RunOptions(**(field_inv_data.get('options') or {})),
                    **other_other,
                    )
     @classmethod
-    def from_yaml(cls, input_file: str | Path) -> 'Analysis':
+    def from_yaml(cls, input_file: str | Path) -> 'FieldInversion':
         with open(input_file) as file:
             input_data = yaml.safe_load(file)
-        return cls.from_dict(input_data)
+        return cls.from_dict(input_data['field_inversion'])
 
     # convert dataclass to a dictionary
     def to_dict(self) -> dict:
@@ -161,6 +162,71 @@ class Analysis:
         for file in yaml_data['files']:
             if yaml_data['files'][file] is not None:
                 yaml_data['files'][file] = yaml_data['files'][file].as_posix()
+        # file contains 2 big entries, each with a subdictionary
+        yaml_data = {'field_inversion': yaml_data.copy()}
+        with open(cfg_file, 'w') as file:
+            # (keep original key order to make YAML file easier to compare)
+            yaml.safe_dump(yaml_data, file, sort_keys=False)
+
+
+@dataclass(frozen=True, slots=True)
+class FilesML:
+    training_data: str | Path
+    output_dir: str | Path
+    test_data: str | Path | None = None
+    
+    def __post_init__(self):
+        object.__setattr__(self, 'training_data', Path(self.training_data))
+        object.__setattr__(self, 'output_dir', Path(self.output_dir))
+        if self.test_data is not None:
+            object.__setattr__(self, 'test_data', Path(self.test_data))
+
+
+@dataclass(frozen=True, slots=True)
+class GaussianProcess:
+    kernel: str
+
+
+@dataclass(frozen=True, slots=True)
+class MachineLearning:
+    files: FilesML
+    ML: GaussianProcess
+    options: RunOptions = field(default_factory=RunOptions)
+    steady: bool = True
+
+    # declared as a class method => takes cls in input, not self
+    # ('cls' referes to the class in itself, as a blueprint, not to the instance,
+    # like 'self' does)
+    @classmethod
+    def from_dict(cls, input_data: dict) -> 'MachineLearning':
+        field_inv_data = input_data['machine_learning']
+        # groups of options present also in the YAML file
+        yaml_groups = {'files', 'gaussian_process'}
+        # other groups
+        other_groups = {key: value for key, value in field_inv_data.items() if key not in yaml_groups}
+        return cls(files=FilesML(**field_inv_data['files']),
+                   ML=GaussianProcess(**field_inv_data['gaussian_process']),
+                   #options=RunOptions(**(field_inv_data.get('options') or {})),
+                   **other_groups,
+                   )
+    @classmethod
+    def from_yaml(cls, input_file: str | Path) -> 'MachineLearning':
+        with open(input_file) as file:
+            input_data = yaml.safe_load(file)
+        return cls.from_dict(input_data)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+    
+    # write datalcass options to yaml (for reproducibility)
+    def to_yaml(self, cfg_file: str | Path) -> None:
+        # convert all Path objects to strings
+        yaml_data = self.to_dict()
+        for file in yaml_data['files']:
+            if yaml_data['files'][file] is not None:
+                yaml_data['files'][file] = yaml_data['files'][file].as_posix()
+        # file contains 2 big entries, each with a subdictionary
+        yaml_data = {'machine_learning': yaml_data.copy()}
         with open(cfg_file, 'w') as file:
             # (keep original key order to make YAML file easier to compare)
             yaml.safe_dump(yaml_data, file, sort_keys=False)

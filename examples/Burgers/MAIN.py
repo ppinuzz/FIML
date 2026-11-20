@@ -22,10 +22,10 @@ import fiml
 
 
 # set to true if running the script from Spyder
-SPYDER_RUN = False
-FIELD_INVERSION_INPUT = 'setup_FIML/BCDirichlet_steady_nu_u.yaml'
-ML_INPUT = 'setup_FIML/BCDirichlet_steady_nu_u.yaml'
-POSTPROC_INPUT = 'setup_FIML/Burgers_post.yaml'
+SPYDER_RUN = True
+FIELD_INVERSION_INPUT = Path('setup_FIML/BCDirichlet_steady_nu_u.yaml')
+ML_INPUT = FIELD_INVERSION_INPUT
+POSTPROC_INPUT = Path('setup_FIML/Burgers_post.yaml')
 
 
 #%% RUN FUNCTIONS
@@ -37,9 +37,9 @@ def run_field_inversion(input_file=None, input_data=None):
         raise ValueError('Provide either input_file or input_data, not both!')
 
     if input_file is not None:
-        input_obj = fiml.config.Analysis.from_yaml(input_file)
+        input_obj = fiml.config.FieldInversion.from_yaml(input_file)
     else:
-        input_obj = fiml.config.Analysis.from_dict(deepcopy(input_data))
+        input_obj = fiml.config.FieldInversion.from_dict(deepcopy(input_data))
 
     # some functions still require dictionaries, not classes
     input_obj_dict = input_obj.to_dict()
@@ -50,7 +50,7 @@ def run_field_inversion(input_file=None, input_data=None):
     out_dir = input_obj.files.output_dir
     if out_dir is not None:
         out_dir.mkdir(parents=True, exist_ok=True)
-        run_input_file = out_dir / 'input_used.yaml'
+        run_input_file = out_dir / 'FI_input.yaml'
         input_obj.to_yaml(run_input_file)
 
     problem, exp_data, exact_sol, cost_fun_obj = fiml.auxiliaries.read_input_data(
@@ -66,6 +66,24 @@ def run_field_inversion(input_file=None, input_data=None):
 
 def run_machine_learning(input_file=None, input_data=None):
     """Reserved for the machine-learning workflow."""
+    
+    if (input_file is None) == (input_data is None):
+        raise ValueError('Provide either input_file or input_data, not both!')
+    
+    if input_file is not None:
+        input_obj = fiml.config.MachineLearning.from_yaml(input_file)
+    else:
+        input_obj = fiml.config.MachineLearning.from_dict(deepcopy(input_data))
+    
+    # for reproducibility: write a copy of the input data
+    run_input_file = None
+    out_dir = input_obj.files.output_dir
+    if out_dir is not None:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        run_input_file = out_dir / 'ML_input.yaml'
+        input_obj.to_yaml(run_input_file)
+    
+    ML_obj = fiml.main.machine_learning(input_obj)
     
     raise NotImplementedError('Machine-learning execution is in the making')
 
@@ -150,7 +168,8 @@ def cli(argv=None):
 
 if __name__ == '__main__':
     if SPYDER_RUN:
-        result = main(field_inv_file=FIELD_INVERSION_INPUT)
+        #result = main(field_inv_file=FIELD_INVERSION_INPUT)
+        result = main(ML_file=ML_INPUT)
         # result = main(post_file=POSTPROC_INPUT)
         # result = main(field_inv_data=my_input_dict)
     else:
