@@ -270,7 +270,7 @@ def launch_sampling(theta_samples, run_solver_case, solver_fun, N_x, N_t, N_samp
     return sampling_results
 
 
-def minimise_cost_function(cost_and_jacobian, x0, method='amsgrad',
+def minimise_cost_function(cost_and_jacobian, x0, method='adam',
                            learn_rate=1e-2, max_iter=500, tol=1e-5,
                            max_backtrack=8, print_every=20):
     
@@ -288,7 +288,11 @@ def minimise_cost_function(cost_and_jacobian, x0, method='amsgrad',
     #   - objective function is finite
     #   - gradient of objective function is finite
     def _is_valid_sol(cost, grad, forward_ok):
-        okay_sol = forward_ok & jnp.isfinite(cost) & jnp.all(jnp.isfinite(grad))
+        okay_sol = (forward_ok & jnp.isfinite(cost) 
+                    # very big components can generate a huge number, beyond
+                    # tha max. representable number, when summed to calculate 
+                    # the norm
+                    & jnp.all(jnp.isfinite(grad)) & jnp.isfinite(jnp.linalg.norm(grad)))
         return okay_sol
 
     @jax.jit
@@ -317,7 +321,8 @@ def minimise_cost_function(cost_and_jacobian, x0, method='amsgrad',
         # (exact solution: grad(J) = 0)
         def continue_optimisation(state):
             _, _, _, grad, N_it, _, valid, _, _ = state
-            keep_going = valid & (N_it < max_iter) & (jnp.linalg.norm(grad) > tol)
+            keep_going = (valid & (N_it < max_iter) 
+                          & (jnp.linalg.norm(grad) > tol) & jnp.isfinite(jnp.linalg.norm(grad)))
             return keep_going
 
         def optimisation_step(state):
