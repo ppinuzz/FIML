@@ -83,6 +83,14 @@ def run_machine_learning(input_file=None, input_data=None):
         run_input_file = out_dir / 'ML_input.yaml'
         input_obj.to_yaml(run_input_file)
     
+    # some functions still require dictionaries, not classes
+    input_obj_dict = input_obj.to_dict()
+    # HACK: move the case type somewhere else, don't hard code it!
+    problem, exp_data, exact_sol, cost_fun_obj = fiml.auxiliaries.read_input_data(
+                                                    input_obj_dict, 
+                                                    case_type='Burgers_u0uLnu0beta',
+                                                    mode='machine_learning')
+    
     ML_obj = fiml.main.machine_learning(input_obj)
     
     raise NotImplementedError('Machine-learning execution is in the making')

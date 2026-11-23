@@ -20,6 +20,8 @@ just_fix_windows_console()
 from prettytable import PrettyTable
 import cloudpickle
 import yaml
+import re
+import random
 import fiml.objects as objs
 from types import SimpleNamespace
 
@@ -404,16 +406,20 @@ def print_theta(theta_MAP, theta_prior, STEADY, t_mesh=None, t=None):
     check_msg(theta_report.get_string())
 
 
-def read_input_data(input_obj, mode, solver=None):   
+def read_input_data(input_obj, mode, solver=None, case_type=None):   
     input_data = _read_file_or_obj(input_obj, msg='input file')
     
     match mode.lower():
         case 'field_inversion':
-            return _read_field_inversion_input(input_data, input_data['files']['solution'], input_data['files']['data'], solver)
+            return _read_field_inversion_input(input_data, input_data['files']['solution'], 
+                                               input_data['files']['data'], solver)
         case 'postprocessing':
-            return _read_postproc_input(input_data, input_data['FIML_file'], input_data['exact_solution_file'], input_data['data_file'])
+            return _read_postproc_input(input_data, input_data['FIML_file'], 
+                                        input_data['exact_solution_file'], 
+                                        input_data['data_file'])
         case 'machine_learning':
-            return _read_machine_learning_input(input_data['files']['training_data'], input_data['files']['test_data'])
+            return _read_machine_learning_input(input_data['files']['training_data'], 
+                                                case_type, input_data['files']['test_data'])
         case _:
             raise ValueError("Missing or invalid mode: either 'analysis' or 'postprocessing'")
 
@@ -514,17 +520,65 @@ def _read_postproc_input(output_data, FIML_file, exact_sol_file, exp_data_file=N
     return FIML.problem, exact_sol, exp_data, FIML
 
 
-def _read_machine_learning_input(train_file, test_file=None):
+def _read_machine_learning_input(train_file, case_type, test_file=None, test2tot=0.7):
     print(f'Reading training data from \n\t{train_file.resolve()}')
     with h5py.File(train_file, 'r') as file:
-        # obj       h5py.Dataset object, vanishes once file is closed
-        # obj[:]    numpy.ndarray, read the entire array, breaks if the
-        #           data stored in dataset[key] is a scalar 
-        # obj[()]   numpy.ndarray or scalar, read whatever's in the database
-        FI_objs = file['g']
-        exp_data = objs.ExperimentalData(x=file['probes']['x'][:],
-                                         t=file['probes']['t'][:],
-                                         solution=file['exact']['solution'][:])
+        data = []
+        for case_name in file:
+            MAP_obj = cloudpickle.loads(jnp.asarray(file[case_name]))
+            params = _read_dir_name(case_name, case_type)
+            sim_obj = objs.SimulationML(case_id=case_name, params=params,
+                                        MAP=MAP_obj)
+            data.append(sim_obj)
+    if test_file is None:
+        warning('No test data file explicitly passed, splitting randomly training data '
+                f'into {100*test2tot:.0f}% training data and {100*(1-test2tot):.0f}% test data...')
+        N_test = int((1-test2tot) * len(data))  # truncated (same as floor)
+        if N_test == 0:
+            warning(f'{100*(1-test2tot):.0f}% of data is rounded to 0, forcing it to 1 test case...\n'
+                    '(Either increment the number of data, or modify the fraction for testing)')
+        # randomly shuffle the data and remove the last 30% of them => same as
+        # randomly sampling 30%, if the order is not relevant
+        # https://stackoverflow.com/a/44884212/17220538
+        random.shuffle(data)
+        test_data = data[-N_test:]              # last "N_test" elements
+        train_data = data[0:len(data)-N_test]   # all the others
+    else:
+        train_data = data
+        
+        print(f'Reading test data from \n\t{test_file.resolve()}')
+        with h5py.File(test_file, 'r') as file:
+            test_data = []
+            for case_name in file:
+                MAP_obj = cloudpickle.loads(jnp.asarray(file[case_name]))
+                params = _read_dir_name(case_name, case_type)
+                sim_obj = objs.SimulationML(case_id=case_name, params=params,
+                                            MAP=MAP_obj)
+                test_data.append(sim_obj)
+    
+    ML_obj = objs.DataML(training=tuple(train_data), test=tuple(test_data))
+    return ML_obj
+
+
+def _read_dir_name(case_name, case_type):
+    match case_type:
+        case 'Burgers_u0uLnu0beta':
+            # (?P<u0>...)   named capture groupd with name 'u0'
+            pattern = re.compile(r'^u0(?P<u0>[-+]?\d*\.?\d+)'
+                                 r'_uL(?P<uL>[-+]?\d*\.?\d+)'
+                                 r'_nu0(?P<nu0>[-+]?\d*\.?\d+)'
+                                 r'_(?P<name>.+)$'
+                                 )
+            match = pattern.fullmatch(case_name)
+            if match is None:
+                warning(f"Case directory '{case_name}' doesn't match the given pattern")
+            params = objs.BurgersParameters(u0=float(match.group('u0')),
+                                            uL=float(match.group('uL')),
+                                            nu0=float(match.group('nu0')),
+                                            beta_type=match.group('name'))
+        case _:
+            raise ValueError(f"Unknown case dir {case_type}")
+    return params
 
 
 

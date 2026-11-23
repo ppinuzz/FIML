@@ -14,6 +14,8 @@ import fiml.fiml as fiml
 import fiml.auxiliaries as aux
 
 
+## ----------------------------- FIELD INVERSION -----------------------------
+
 @dataclass
 class Problem:
     # mark it as a dictionary that will be unpacked and read during
@@ -256,10 +258,30 @@ class FieldInversionObject:
         self.N_params = self.beta_params['N_params']
 
 
+
+## ----------------------------- MACHINE LEARNING -----------------------------
+
+# frozen=True   dataclass attributes cannot be modified (e.g. rewriting a value)
+# slots=True    new attributes outside of those defined here cannot be created
+@dataclass(frozen=True, slots=True)
+class BurgersParameters:
+    u0: float
+    uL: float
+    nu0: float
+    beta_type: str
+
+
+@dataclass
+class SimulationML:
+    case_id: str
+    params: BurgersParameters 
+    MAP: MAPResult
+
+
 @dataclass
 class DataML:
-    training: tuple[MAPResult]
-    test: tuple[MAPResult] | None = None
+    training: tuple[SimulationML]
+    test: tuple[SimulationML] | None = None
 
 
 @dataclass
