@@ -276,7 +276,7 @@ class BurgersParameters:
 class SimulationML:
     case_id: str
     params: BurgersParameters 
-    MAP: MAPResult
+    FI: FieldInversionObject
 
 
 @dataclass

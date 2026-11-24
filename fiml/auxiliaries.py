@@ -23,6 +23,7 @@ import yaml
 import re
 import random
 import fiml.objects as objs
+from fiml.fiml import propagate_covariance_beta
 from types import SimpleNamespace
 
 
@@ -524,10 +525,10 @@ def _read_machine_learning_input(input_data, train_file, case_type, test_file=No
     with h5py.File(train_file, 'r') as file:
         data = []
         for case_name in file:
-            MAP_obj = cloudpickle.loads(jnp.asarray(file[case_name]))
+            case_obj = cloudpickle.loads(jnp.asarray(file[case_name]))
             params = _read_dir_name(case_name, case_type)
             sim_obj = objs.SimulationML(case_id=case_name, params=params,
-                                        MAP=MAP_obj)
+                                        FI=case_obj)
             data.append(sim_obj)
     if test_file is None:
         warning('No test data file explicitly passed, splitting randomly training data '

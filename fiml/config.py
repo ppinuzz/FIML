@@ -73,7 +73,7 @@ class Optimisation:
 
 
 @dataclass(frozen=True, slots=True)
-class RunOptions:
+class FieldInversionOptions:
     # for unsteady problems
     show_videos: bool = False
     run_parallel: bool = False
@@ -107,7 +107,7 @@ class FieldInversion:
     mesh: Mesh = field(default_factory=Mesh)
     beta: Beta = field(default_factory=Beta)
     optimisation: Optimisation = field(default_factory=Optimisation)
-    options: RunOptions = field(default_factory=RunOptions)
+    options: FieldInversionOptions = field(default_factory=FieldInversionOptions)
     steady: bool = True
     regularisation_weight: float = 1
     num_samples_prior: int = 100
@@ -141,7 +141,7 @@ class FieldInversion:
                    mesh=Mesh(**(input_data.get('mesh') or {})),
                    beta=Beta(**beta_data),
                    optimisation=Optimisation(**(input_data.get('optimisation') or {})),
-                   options=RunOptions(**(input_data.get('options') or {})),
+                   options=FieldInversionOptions(**(input_data.get('options') or {})),
                    **other_other,
                    )
     @classmethod
@@ -168,6 +168,9 @@ class FieldInversion:
             yaml.safe_dump(yaml_data, file, sort_keys=False)
 
 
+## ----------------------------- MACHINE LEARNING -----------------------------
+
+
 @dataclass(frozen=True, slots=True)
 class FilesML:
     training_data: str | Path
@@ -187,11 +190,33 @@ class GaussianProcess:
 
 
 @dataclass(frozen=True, slots=True)
+class MachineLearningOptions:
+    #run_parallel: bool = False
+    # max number of workers in the parallel execution pool (one job each)
+    #parallel_workers: int = 4
+    # check all possible outputs
+    check_outputs: bool = True
+    # skip all videos, plots and
+    batch_mode: bool = False
+    # time instant to plot (default is last one)
+    #idx_time_plot: int = -1
+    
+    def __post_init__(self):
+        if self.batch_mode:
+            warning('BATCH mode selected, turning off all plot flags...')
+            object.__setattr__(self, 'check_outputs', False)
+
+
+@dataclass(frozen=True, slots=True)
 class MachineLearning:
     files: FilesML
     ML: GaussianProcess
-    options: RunOptions = field(default_factory=RunOptions)
+    options: MachineLearningOptions = field(default_factory=MachineLearningOptions)
     steady: bool = True
+    # number of points extracted from each case (can be less than the number
+    # of data points in a case to reduce memory requirements)
+    points_case: int | None = None
+    
 
     # declared as a class method => takes cls in input, not self
     # ('cls' referes to the class in itself, as a blueprint, not to the instance,
@@ -199,12 +224,12 @@ class MachineLearning:
     @classmethod
     def from_dict(cls, input_data: dict) -> 'MachineLearning':
         # groups of options present also in the YAML file
-        yaml_groups = {'files', 'gaussian_process'}
+        yaml_groups = {'files', 'gaussian_process', 'options'}
         # other groups
         other_groups = {key: value for key, value in input_data.items() if key not in yaml_groups}
         return cls(files=FilesML(**input_data['files']),
                    ML=GaussianProcess(**input_data['gaussian_process']),
-                   #options=RunOptions(**(field_inv_data.get('options') or {})),
+                   options=MachineLearningOptions(**(input_data.get('options') or {})),
                    **other_groups,
                    )
     @classmethod

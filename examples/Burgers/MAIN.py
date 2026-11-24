@@ -93,6 +93,8 @@ def run_machine_learning(input_file=None, input_data=None):
     
     
     raise NotImplementedError('Machine-learning execution is in the making')
+    
+    return ML_obj
 
 
 def run_postprocessing(input_file=None, input_data=None):

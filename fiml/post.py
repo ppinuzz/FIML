@@ -579,3 +579,34 @@ def check_exact_beta_PDE(theta_ex, run_solver, sol_exact, problem, PLOT=True,
         if fig_file is not None:
             aux.save_fig(fig_error, f'{fig_file.name}_error', fig_file.parent)
         plt.show(block=False)
+
+
+def plot_original_dataset(data, name_dataset=None, fig_file=None):
+    fig_train = plt.figure()
+    for case_i in data:
+        sol = case_i.FI.MAP.solution.ravel(order='C')
+        beta = case_i.FI.MAP.beta.ravel(order='F')
+        plt.scatter(sol, beta, label=case_i.case_id)
+    plt.xlabel('$u$ [-]')
+    plt.ylabel(r'$\beta$ [-]')
+    if name_dataset is not None:
+        plt.title(r'$\{u, \beta\}$' + f' pairs in dataset {name_dataset}')
+    plt.autoscale(enable=True, axis='both', tight=True)
+    plt.legend()
+    if fig_file is not None:
+        aux.save_fig(fig_train, f'{fig_file.name}', fig_file.parent)
+    plt.show(block=False)
+    
+    
+
+def plot_prepared_dataset(data, name_dataset=None, fig_file=None):
+    fig = plt.figure()
+    plt.scatter(data.sol, data.beta)
+    plt.xlabel('$u$ [-]')
+    plt.ylabel(r'$\beta$ [-]')
+    if name_dataset is not None:
+        plt.title(r'$\{u, \beta\}$' + f' pairs in dataset {name_dataset}')
+    plt.autoscale(enable=True, axis='both', tight=True)
+    if fig_file is not None:
+        aux.save_fig(fig, f'{fig_file.name}', fig_file.parent)
+    plt.show(block=False)

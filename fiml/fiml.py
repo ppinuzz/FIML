@@ -228,6 +228,61 @@ def invert_covariance_matrix(C, at_least_2d=False, N=None):
     return C_inv
 
 
+def propagate_covariance_beta(MAP, idx=None):
+    if idx is None:
+        idx = slice(None)
+    # approximate function beta(theta) using 1st order Taylor expansion 
+    #   beta(theta) = beta(theta_MAP) + dbeta/dtheta_MAP * (theta - theta_MAP) + ...
+    # where dbeta/dtheta_MAP_ij = dbeta(u(x_i))/dtheta_j @ MAP = B_MAP
+    # calculate its covariance matrix from the def.
+    #   C_beta = E[(beta - E[beta])(beta - E[beta])^T]
+    # resulting in the approx. 1st order C_beta = B_MAP C_theta B_MAP^T
+    # beta is (Nx, Nt) => ravel it to have a column vector of columne vectors, 
+    # each representing beta(x) at a fixed t => (NtNx, 1) vector
+    # B has shape (NtNx, N_theta) => NxNt could be huge, select only the subspace
+    B = jax.jacfwd(lambda theta: 
+                       MAP.beta_fun(theta, x=MAP.x, t=MAP.t, u=MAP.solution).ravel(order='F')[idx]
+                   )(MAP.theta)
+    C_beta = B @ MAP.covariance @ B.T
+    return C_beta
+
+
+def prepare_training_data(cases, N=None):
+    if N is not None:
+        aux.warning('Calculating the covariance matrix C_beta from C_theta '
+                    f'using only a subset of {N} points from each case')
+
+    sol_all = []
+    beta_all = []
+    C_beta_all = []
+    for case_i in cases:
+        MAP = case_i.FI.MAP
+        # u: (Nt, Nx), beta: (Nx, Nt) => reorder them as a column vector of
+        # column vectors, each corresponding to a single time instant
+        # u_t = [u(x_1,t^k), ..., u(x_N,t^k)]^T     (Nx, 1)
+        # u = [u_t0, ..., u_tN]^T                   (NtNx, 1)
+        u = MAP.solution.ravel(order='C')
+        beta = MAP.beta.ravel(order='F')
+
+        n_case = min(N, u.size) if N is not None else u.size
+        # split the codomain [u.min(), u.max()] into n_case parts wouldn't 
+        # respce the asymmetries of data (e.g. data skewed toward u.min)
+        # => sort data and select every n_case-th data from the sorted array
+        ranks = jnp.linspace(0, u.size-1, n_case, dtype=int)
+        idx = jnp.argsort(u, stable=True)[ranks]
+        sol_all.append(u[idx])
+        beta_all.append(beta[idx])
+
+        # propagate theta uncertainty to beta
+        C_beta = propagate_covariance_beta(MAP, idx)
+        C_beta_all.append(C_beta)
+    
+    train_data = objs.GPData(sol=jnp.concatenate(sol_all), beta=jnp.concatenate(beta_all),
+                             covariance_beta_blocks=tuple(C_beta_all))
+
+    return train_data
+
+
 def launch_sampling(theta_samples, run_solver_case, solver_fun, N_x, N_t, N_samples, solver_args, sample_dir=None, RUN_PARALLEL=False, N_WORKERS=1):
     solution = jnp.zeros(shape=(N_t, N_x, N_samples))
     # 2nd dimension 1 is not really needed, but that way they have the same
