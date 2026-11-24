@@ -406,8 +406,7 @@ def print_theta(theta_MAP, theta_prior, STEADY, t_mesh=None, t=None):
     check_msg(theta_report.get_string())
 
 
-def read_input_data(input_obj, mode, solver=None, case_type=None):   
-    input_data = _read_file_or_obj(input_obj, msg='input file')
+def read_input_data(input_data, mode, solver=None, case_type=None):   
     
     match mode.lower():
         case 'field_inversion':
@@ -418,7 +417,7 @@ def read_input_data(input_obj, mode, solver=None, case_type=None):
                                         input_data['exact_solution_file'], 
                                         input_data['data_file'])
         case 'machine_learning':
-            return _read_machine_learning_input(input_data['files']['training_data'], 
+            return _read_machine_learning_input(input_data, input_data['files']['training_data'], 
                                                 case_type, input_data['files']['test_data'])
         case _:
             raise ValueError("Missing or invalid mode: either 'analysis' or 'postprocessing'")
@@ -520,7 +519,7 @@ def _read_postproc_input(output_data, FIML_file, exact_sol_file, exp_data_file=N
     return FIML.problem, exact_sol, exp_data, FIML
 
 
-def _read_machine_learning_input(train_file, case_type, test_file=None, test2tot=0.7):
+def _read_machine_learning_input(input_data, train_file, case_type, test_file=None, test2tot=0.7):
     print(f'Reading training data from \n\t{train_file.resolve()}')
     with h5py.File(train_file, 'r') as file:
         data = []

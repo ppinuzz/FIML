@@ -141,6 +141,7 @@ class MAPResult:
     max_res: jax.Array
     success: jax.Array
     opt: dict
+    beta_fun: Callable
     jacobian: jax.Array | None = None
     hessian: jax.Array | None = None
     # posterior covariance matrix, approx. as C_theta = H^-1(theta_MAP) in [Parish2016]
@@ -279,6 +280,18 @@ class SimulationML:
 
 
 @dataclass
+class GPData:
+    beta: jax.Array
+    sol: jax.Array
+    covariance_beta_blocks: tuple[jax.Array, ...]
+    #case_ids: tuple[str, ...]
+    
+    def __post_init__(self):
+        self.beta = jnp.asarray(self.beta)
+        self.sol = jnp.asarray(self.sol)
+
+
+@dataclass
 class DataML:
     training: tuple[SimulationML]
     test: tuple[SimulationML] | None = None
@@ -287,3 +300,4 @@ class DataML:
 @dataclass
 class MachineLearningObject:
     data: DataML
+    GP_data: GPData

@@ -1,5 +1,6 @@
 """
-Utilities to construct beta function.
+Utilities to construct beta function with signature 
+    beta = beta(theta, u=None, x=None, t=None)
 
 @author: Andrea Pinardi <andrea.pinardi@polimi.it>
 """

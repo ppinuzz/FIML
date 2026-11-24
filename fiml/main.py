@@ -491,10 +491,10 @@ def field_inversion(exp_data, problem, cost_fun_obj, beta_opts, analysis_obj,
     return FIML
 
 
-def machine_learning(input_obj):
+def machine_learning(input_obj, data_obj):
     
     # OUTPUT DATA FILE
-    out_filename = input_obj.files.output_dir / 'output.h5'
+    out_filename = input_obj.files.output_dir / 'MachineLearning.h5'
     # common compression options
     # shuffle: allows blocks to be moved around, possible memory gain
     # gzip: most portable and fairly fast
