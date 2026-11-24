@@ -254,6 +254,7 @@ def prepare_training_data(cases, N=None):
 
     sol_all = []
     beta_all = []
+    C_theta_all = []
     C_beta_all = []
     for case_i in cases:
         MAP = case_i.FI.MAP
@@ -276,9 +277,11 @@ def prepare_training_data(cases, N=None):
         # propagate theta uncertainty to beta
         C_beta = propagate_covariance_beta(MAP, idx)
         C_beta_all.append(C_beta)
+        C_theta_all.append(MAP.covariance)
     
     train_data = objs.GPData(sol=jnp.concatenate(sol_all), beta=jnp.concatenate(beta_all),
-                             covariance_beta_blocks=tuple(C_beta_all))
+                             covariance_beta_blocks=tuple(C_beta_all),
+                             covariance_theta_blocks=tuple(C_theta_all))
 
     return train_data
 

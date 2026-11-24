@@ -501,11 +501,12 @@ def machine_learning(input_obj, data_obj):
     # compression_opts: for GZIP, it's the compressione level (9: maximum)
     comprex_opts = {'shuffle': True, 'compression': 'gzip', 'compression_opts': 9}
     with h5py.File(out_filename, 'w') as out_file:
-        # check original datasets
-        post.plot_original_dataset(data_obj.training, name_dataset='training',
-                                   fig_file=input_obj.files.output_dir/'trainDatasetOriginal')
-        post.plot_original_dataset(data_obj.test, name_dataset='test',
-                                   fig_file=input_obj.files.output_dir/'testDatasetOriginal')
+        if input_obj.options.check_outputs:
+            # check original datasets
+            post.plot_original_dataset(data_obj.training, name_dataset='training',
+                                       fig_file=input_obj.files.output_dir/'trainDatasetOriginal')
+            post.plot_original_dataset(data_obj.test, name_dataset='test',
+                                       fig_file=input_obj.files.output_dir/'testDatasetOriginal')
         
         # put training data all together, undersampling each case if needed,  
         # and translate the covariance on theta (from field inversion) to the
@@ -513,7 +514,11 @@ def machine_learning(input_obj, data_obj):
         train_data = fiml.prepare_training_data(data_obj.training, N=input_obj.points_case)
         
         if input_obj.options.check_outputs:
-            post.plot_prepared_dataset(train_data, name_dataset='training', fig_file=input_obj.files.output_dir/'trainDataset')
+            post.plot_covariance_matrices(train_data, fig_file=input_obj.files.output_dir/'covariances')
+        
+        if input_obj.options.check_outputs:
+            post.plot_prepared_dataset(train_data, name_dataset='training',
+                                       fig_file=input_obj.files.output_dir/'trainDataset')
         
 # =============================================================================
 #         hdf5_group = out_file.create_group('mesh')

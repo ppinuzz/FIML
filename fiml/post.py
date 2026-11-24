@@ -590,7 +590,7 @@ def plot_original_dataset(data, name_dataset=None, fig_file=None):
     plt.xlabel('$u$ [-]')
     plt.ylabel(r'$\beta$ [-]')
     if name_dataset is not None:
-        plt.title(r'$\{u, \beta\}$' + f' pairs in dataset {name_dataset}')
+        plt.title(r'$\{(u_i, \beta_i)\}$' + f' pairs in dataset {name_dataset}')
     plt.autoscale(enable=True, axis='both', tight=True)
     plt.legend()
     if fig_file is not None:
@@ -605,8 +605,38 @@ def plot_prepared_dataset(data, name_dataset=None, fig_file=None):
     plt.xlabel('$u$ [-]')
     plt.ylabel(r'$\beta$ [-]')
     if name_dataset is not None:
-        plt.title(r'$\{u, \beta\}$' + f' pairs in dataset {name_dataset}')
+        plt.title(r'$\{(u_i, \beta_i)\}$' + f' pairs in dataset {name_dataset}')
     plt.autoscale(enable=True, axis='both', tight=True)
+    if fig_file is not None:
+        aux.save_fig(fig, f'{fig_file.name}', fig_file.parent)
+    plt.show(block=False)
+
+
+def plot_covariance_matrices(train_data, idx_case=None, fig_file=None):
+    if idx_case is None:
+        aux.warning('No case index given, plotting the 1st case...')
+        idx_case = 0
+    C_theta = train_data.covariance_theta_blocks[idx_case]
+    C_beta = train_data.covariance_beta_blocks[idx_case]
+    
+    #vmin = min(C_theta.min(), C_beta.min())
+    #vmax = max(C_theta.max(), C_beta.max())
+    
+    fig, ax = plt.subplots(1, 2)
+    data_iter = (ax, 
+                 (C_theta, C_beta),
+                 (r'$\mathbf{C}_\theta$', r'$\mathbf{C}_\beta$'),
+                 ('viridis', 'inferno'),
+                 (r'$\mathrm{Cov}(\theta_i,\theta_j)$', r'$\mathrm{Cov}(\beta_i,\beta_j)$')
+                 )
+    # zip() must contain a collection of objects => unpack the tuple!
+    for ax_i, M, title, cmap, label in zip(*data_iter):
+        #im = ax_i.imshow(M, cmap='viridis', vmin=vmin, vmax=vmax)
+        im = ax_i.imshow(M, cmap=cmap)
+        ax_i.set_title(title)
+        ax_i.set_xlabel('Column index')
+        ax_i.set_ylabel('Row index')
+        fig.colorbar(im, ax=ax_i, label=label, shrink=0.8)
     if fig_file is not None:
         aux.save_fig(fig, f'{fig_file.name}', fig_file.parent)
     plt.show(block=False)

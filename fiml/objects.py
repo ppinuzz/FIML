@@ -283,6 +283,7 @@ class SimulationML:
 class GPData:
     beta: jax.Array
     sol: jax.Array
+    covariance_theta_blocks: tuple[jax.Array, ...]
     covariance_beta_blocks: tuple[jax.Array, ...]
     #case_ids: tuple[str, ...]
     
