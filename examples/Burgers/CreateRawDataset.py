@@ -35,23 +35,14 @@ N_probes = 40
 # basic setup files and common parameters
 import setup_Burgers.BCDirichlet_steady_nu_u as cfg
 
-# =============================================================================
-# u0_vet = jnp.array([-2, -1, 0, 0.5, 1, 2])
-# uL_vet = jnp.array([-2, -1, 0, 0.5, 1, 2])
-# nu0_vet = jnp.array([1e-3, 1e-2, 1e-1])
-# beta_vet = {'monotonic_increase': lambda x, t, u, ux, uxx: (1 + 20*u**2 + 2*jnp.sin(u)),
-#             'downward_parabola': lambda x, t, u, ux, uxx: (1 - 50*u**2 + 55*u),
-#             'cubic': lambda x, t, u, ux, uxx: (2 + 10*u**3 - 10*u**2),
-#             'oscillating': lambda x, t, u, ux, uxx: (2 + 10*u**3 - 10*u**2)
-#             }
-# =============================================================================
+
 u0_vet = jnp.array([0, 0.5, 1, 1.5, 2])
 uL_vet = jnp.array([0, 0.5, 1, 1.5, 2])
 nu0_vet = jnp.array([1e-3, 5e-3, 1e-2])
 beta_vet = {'monotonic_increase': lambda x, t, u, ux, uxx: (1 + 20*u**2 + 2*jnp.sin(u)),
             'downward_parabola': lambda x, t, u, ux, uxx: (1 - 50*u**2 + 55*u),
             'cubic': lambda x, t, u, ux, uxx: (2 + 10*u**3 - 10*u**2),
-            'oscillating': lambda x, t, u, ux, uxx: (2 + 10*u**3 - 10*u**2)
+            'oscillating': lambda x, t, u, ux, uxx: (2 + u + jnp.sin(10*u))
             }
 N_tot = u0_vet.size * uL_vet.size * nu0_vet.size * len(beta_vet)
 
@@ -98,7 +89,7 @@ for u0 in u0_vet:
             continue
         for beta_name in beta_vet:
             for nu0 in nu0_vet:
-                print(f'Dataset : {n}/{N_tot}\n', 
+                print(f'Dataset : {n}/{N_tot} \n', 
                       f'u0      : {u0} \n'
                       f'uL      : {uL} \n'
                       f'nu0     : {nu0} \n'
