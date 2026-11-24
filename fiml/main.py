@@ -326,7 +326,7 @@ def field_inversion(exp_data, problem, cost_fun_obj, beta_opts, analysis_obj,
         FIML.MAP = objs.MAPResult(theta=theta_MAP, solution=sol_MAP, 
                                   beta=beta_fun(theta_MAP, u=sol_MAP),
                                   max_res=max_res_MAP, success=success_MAP, opt=opt,
-                                  x=problem.x_mesh, t=problem.t_mesh)
+                                  x=problem.x_mesh, t=problem.t_mesh, beta_fun=beta_fun)
         
         aux.print_theta(FIML.MAP.theta, theta_prior, problem.STEADY, problem.t_mesh)
         

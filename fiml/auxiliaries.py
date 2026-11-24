@@ -216,7 +216,7 @@ def save_sampling(hdf5_file, group_name, opts, data_obj, save_failed_runs=False)
                    'hessian': 'Hessian matrix of the cost function J(theta_MAP)'
                    }
     
-    print(f"Saving the following fields in HDF5 group '{group_name}': {FIELDS_SAVE.keys()}")
+    print(f"Saving the following fields in HDF5 group '{group_name}': {list(FIELDS_SAVE.keys())}")
     if save_failed_runs:
         print('Saving failed runs (non-converged solution or Inf/NaN solution) '
               'as well as filtered runs, with only converged solutions')
