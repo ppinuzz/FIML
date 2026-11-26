@@ -24,7 +24,7 @@ import fiml.auxiliaries as aux
 import fiml.post as post
 import fiml.beta as betamod
 import fiml.objects as objs
-
+import fiml.gaussproc as GP
 
 def run_solver_case(run_id, theta_r, solver_fun, beta_fun, nu, x_mesh, t_mesh, 
                     u_IC, u0, uL, STEADY, out_dir, TOL=1e-5, PRINT_ERR_MSG=True):
@@ -519,6 +519,12 @@ def machine_learning(input_obj, data_obj):
         if input_obj.options.check_outputs:
             post.plot_prepared_dataset(train_data, name_dataset='training',
                                        fig_file=input_obj.files.output_dir/'trainDataset')
+        
+            
+        print('Searching optimum Gaussian process parameters by maximising the '
+              '(log) likelihood P(beta | parameters)...')
+        GP_opt, opt = GP.fit_gauss_process(train_data)
+        aux.check_optimiser_results(opt)
         
 # =============================================================================
 #         hdf5_group = out_file.create_group('mesh')

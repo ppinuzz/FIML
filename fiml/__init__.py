@@ -40,6 +40,7 @@ from . import post
 from . import beta
 from . import objects
 from . import config
+#from . import gaussproc
 
 
 __version__ = '0.0.1'

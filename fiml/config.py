@@ -185,7 +185,7 @@ class FilesML:
     
 
 @dataclass(frozen=True, slots=True)
-class GaussianProcess:
+class GPoptions:
     kernel: str
 
 
@@ -210,7 +210,7 @@ class MachineLearningOptions:
 @dataclass(frozen=True, slots=True)
 class MachineLearning:
     files: FilesML
-    ML: GaussianProcess
+    ML: GPoptions
     options: MachineLearningOptions = field(default_factory=MachineLearningOptions)
     steady: bool = True
     # number of points extracted from each case (can be less than the number
@@ -228,7 +228,7 @@ class MachineLearning:
         # other groups
         other_groups = {key: value for key, value in input_data.items() if key not in yaml_groups}
         return cls(files=FilesML(**input_data['files']),
-                   ML=GaussianProcess(**input_data['gaussian_process']),
+                   ML=GPoptions(**input_data['gaussian_process']),
                    options=MachineLearningOptions(**(input_data.get('options') or {})),
                    **other_groups,
                    )
