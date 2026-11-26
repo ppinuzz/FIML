@@ -115,7 +115,7 @@ class FieldInversion:
     seed: int | None = None
     hessian: str = 'full'
 
-    def __post__init(self):
+    def __post_init__(self):
         if self.num_samples_prior <= 0:
             raise ValueError('The number of prior samples must be > 0')
         if self.num_samples_posterior <= 0:
@@ -211,6 +211,7 @@ class MachineLearningOptions:
 class MachineLearning:
     files: FilesML
     ML: GPoptions
+    optimisation: Optimisation
     options: MachineLearningOptions = field(default_factory=MachineLearningOptions)
     steady: bool = True
     # number of points extracted from each case (can be less than the number
@@ -224,11 +225,12 @@ class MachineLearning:
     @classmethod
     def from_dict(cls, input_data: dict) -> 'MachineLearning':
         # groups of options present also in the YAML file
-        yaml_groups = {'files', 'gaussian_process', 'options'}
+        yaml_groups = {'files', 'gaussian_process', 'optimisation', 'options'}
         # other groups
         other_groups = {key: value for key, value in input_data.items() if key not in yaml_groups}
         return cls(files=FilesML(**input_data['files']),
                    ML=GPoptions(**input_data['gaussian_process']),
+                   optimisation=Optimisation(**(input_data.get('optimisation') or {})),
                    options=MachineLearningOptions(**(input_data.get('options') or {})),
                    **other_groups,
                    )

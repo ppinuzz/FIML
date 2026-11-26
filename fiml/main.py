@@ -523,7 +523,10 @@ def machine_learning(input_obj, data_obj):
             
         print('Searching optimum Gaussian process parameters by maximising the '
               '(log) likelihood P(beta | parameters)...')
-        GP_opt, opt = GP.fit_gauss_process(train_data)
+        GP_opt, opt = GP.fit_gauss_process(train_data, kernel_name=input_obj.ML.kernel,
+                                           learn_rate=input_obj.optimisation.learning_rate,
+                                           max_iter=input_obj.optimisation.max_iterations,
+                                           method=input_obj.optimisation.optimiser)
         aux.check_optimiser_results(opt)
         
 # =============================================================================

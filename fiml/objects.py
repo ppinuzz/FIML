@@ -298,13 +298,16 @@ class GaussianProcess:
     kernel: Callable
     log_likelihood: Callable
     beta_mean: jax.Array
-    covariance: jax.Array
+    training_covariance: jax.Array
     parameters: tuple[float, ...]
+    normalisation_mean: float
+    normalisation_std: float
     
     def __post_init__(self):
-        self.likelihood = lambda P: jnp.exp(self.likelihood(P))
+        self.likelihood = lambda *args, **kwargs: jnp.exp(self.log_likelihood(*args, **kwargs))
         # must be finite, symmetric, and positive definite
-        aux.check_covariance_matrix(self.covariance)
+        aux.check_covariance_matrix(self.training_covariance)
+        
         
 
 

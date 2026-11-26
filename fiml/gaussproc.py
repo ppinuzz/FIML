@@ -18,87 +18,91 @@ import numpy as np
 
 
 def fit_gauss_process(train_data, beta_mean=1, kernel_name='RBF_Gauss',
-                      learn_rate=1e-2, max_iter=500, tol=1e-5):
+                      learn_rate=1e-2, max_iter=500, tol=1e-5, method='adam',
+                      every_n_iter=40):
     
     # normalise input U to remove scale effects
     u_mean = jnp.mean(train_data.sol)
     u_std = jnp.std(train_data.sol)
     U = (train_data.sol - u_mean) / u_std
-    I = jnp.eye(train_data.sol[0])
     
     # log likelihood:
     # log[P(beta | {amp_kern, len_kern, sigma_err})] = 
-    #   - 0.5 N ln(2*pi) - 0.5 ln(det(Sigma)) - 0.5 (beta-beta_mean) * Sigma * (beta-beta_mean)^T
+    #   - 0.5 N ln(2*pi) - 0.5 ln(det(Sigma)) - 0.5 (beta-beta_mean) * Sigma^-1 * (beta-beta_mean)^T
     # => log to make sure they will always stay positive in the optimiser
     # (if the variable X is representing log(x), x will always be > 0 since it
     # is x = e^X)
-    amp_kern_log = jnp.std(train_data.sol)
-    # log(len) = 0 => len = 1
-    len_kern_log = 0
-    sigma_err = 0
-    P0 = jnp.array([amp_kern_log, len_kern_log, sigma_err])
+    amp_kern_log = jnp.maximum(jnp.sqrt(jnp.mean((train_data.beta - beta_mean)**2)), 1e-3)
+    len_kern_log = 1
+    sigma_err = 0.05 * amp_kern_log
+    P0 = jnp.log(jnp.array([amp_kern_log, len_kern_log, sigma_err]))
     
     # C_beta's are independent matrices, one per each subdataset => assemble
     # them into a block diagonal total covariance matrix
     C_beta = jsl.block_diag(*train_data.covariance_beta_blocks)
     
     @jax.jit
-    def minus_log_likelihood(P):
+    def negative_log_likelihood(P):
         amp_kernel = jnp.exp(P[0])
         len_scale_kernel = jnp.exp(P[1])
         sigma_err = jnp.exp(P[2])
-        Sigma = covariance_GP(kernel, (U, U, kernel_name, amp_kernel, len_scale_kernel), C_beta, sigma_err)
+        Sigma = covariance_GP(kernel, (U, U, kernel_name, (amp_kernel, len_scale_kernel)), C_beta, sigma_err)
         # log likelihood is negative => maximise negative = minimise positive
-        MLL = - log_likelihood(train_data.beta, beta_mean, Sigma)
-        return MLL
+        NLL = - log_likelihood(train_data.beta, beta_mean, Sigma)
+        return NLL
     
-    MLL_and_grad = jax.jit(jax.value_and_grad(minus_log_likelihood))
+    NLL_and_grad = jax.jit(jax.value_and_grad(negative_log_likelihood))
     
-    optimiser = optax.adam(learning_rate=learn_rate)
+    match method.lower():
+        case 'adam':
+            optimiser = optax.adam(learning_rate=learn_rate)
+        case 'amsgrad':
+            optimiser = optax.amsgrad(learning_rate=learn_rate)
+        case _:
+            raise ValueError(f"Unknown adaptive optimiser '{method}'")
+    
     # initialise optimiser internal state with estimates for the 1st and 
     # 2nd moments
     opt_state = optimiser.init(P0)
     history = {'P': jnp.full((max_iter+1, P0.shape[0]), jnp.nan),
                'minus_log_likelihood': jnp.full((max_iter+1, ), jnp.nan),
                'grad': jnp.full((max_iter+1, P0.shape[0]), jnp.nan),
-               'grad_norm': jnp.full((max_iter+1, ), jnp.nan),
-               'N_fun_eval': jnp.full((max_iter+1, ), jnp.nan)
+               'grad_norm': jnp.full((max_iter+1, ), jnp.nan)
                }
     
     t_start = perf_counter()
     n = 0
     P_n = P0
-    N_fun_eval = 0
     grad_norm_n = tol + 1
-    N_it = 0
-    while n < max_iter and grad_norm_n < tol :
-        MLL_n, grad_n = MLL_and_grad(P_n)
-        if ~jnp.isfinite(MLL_n):
+    while n < max_iter and grad_norm_n > tol :
+        NLL_n, grad_n = NLL_and_grad(P_n)
+        if ~jnp.isfinite(NLL_n):
             raise ValueError(f'Non-finite log likelihood at iteration {n}, guess: {list(P_n)}')
         if ~(jnp.isfinite(grad_n).all()):
             raise ValueError(f'Non-finite log likelihood gradient at iteration {n}, guess: {list(P_n)}')
+        
+        grad_norm_n = jnp.linalg.norm(grad_n)
         history['P'] = history['P'].at[n].set(jnp.exp(P_n))
-        history['minus_log_likelihood'] = history['minus_log_likelihood'].at[n].set(MLL_n)
+        history['minus_log_likelihood'] = history['minus_log_likelihood'].at[n].set(NLL_n)
         history['grad'] = history['grad'].at[n].set(grad_n)
-        history['grad_norm'] = history['grad_norm'].at[n].set(jnp.linalg.norm(grad_n))
-        history['N_fun_eval'] = history['N_fun_eval'].at[n].set(N_fun_eval)
+        history['grad_norm'] = history['grad_norm'].at[n].set(grad_norm_n)
+        
+        if n % every_n_iter == 0:
+            print(f'ADAM iteration {n:5d}: NLL = {NLL_n:.8e}, ||grad(NLL)|| = {grad_norm_n:.5e}')
         
         updates, opt_state = optimiser.update(grad_n, opt_state, P_n)
-        updates, proposed_state = optimiser.update(grad_n, opt_state, P_n)
         P_n = optax.apply_updates(P_n, updates)
-        
         n += 1
-        N_it += N_fun_eval
     
     if grad_norm_n > tol:
         converged = False
-        status = 0
+        status = 1
         message = (f'||grad(log_likelihood)|| = {grad_norm_n:.5e} > tolerance '
                    f'after exhausting the {max_iter} iterations')
         aux.warning(message)
     else:
         converged = True
-        status = 1
+        status = 0
         message = f'Converged in {n} iterations'
     
     t_elapsed = perf_counter() - t_start
@@ -110,15 +114,34 @@ def fit_gauss_process(train_data, beta_mean=1, kernel_name='RBF_Gauss',
     
     # variables are the log() => return the actual value, not the log
     P_n_opt = jnp.exp(P_n)
-    Sigma = covariance_GP(kernel, (U, U, kernel_name, P_n_opt[0], P_n_opt[1]), C_beta, P_n_opt[2])
-    GP = objs.GaussianProcess(data=train_data, kernel=kernel, log_likelihood=log_likelihood,
-                              beta_mean=beta_mean, covariance=Sigma, parameters=tuple(P_n_opt)
+    NLL_n, grad_n = NLL_and_grad(P_n)
+    if ~jnp.isfinite(NLL_n):
+        raise ValueError(f'Non-finite log likelihood at iteration {n}, guess: {list(P_n)}')
+    if ~(jnp.isfinite(grad_n).all()):
+        raise ValueError(f'Non-finite log likelihood gradient at iteration {n}, guess: {list(P_n)}')
+    history['P'] = history['P'].at[n].set(jnp.exp(P_n))
+    history['minus_log_likelihood'] = history['minus_log_likelihood'].at[n].set(NLL_n)
+    history['grad'] = history['grad'].at[n].set(grad_n)
+    history['grad_norm'] = history['grad_norm'].at[n].set(jnp.linalg.norm(grad_n))
+    
+    
+    Sigma = covariance_GP(kernel, (U, U, kernel_name, (P_n_opt[0], P_n_opt[1])), C_beta, P_n_opt[2])
+    GP = objs.GaussianProcess(data=train_data, 
+                              kernel=lambda x, z, params: kernel(x, z, kernel_name, params),
+                              log_likelihood=log_likelihood,
+                              beta_mean=beta_mean, training_covariance=Sigma,
+                              parameters=tuple(P_n_opt),
+                              normalisation_mean=float(u_mean),
+                              normalisation_std=float(u_std)
                               )
     
     # for the function checking the result
-    result = sciopt.OptimizeResult(x=np.asarray(P_n_opt), fun=float(MLL_n),
-                                   jac=np.asarray(grad_n), nit=int(N_it),
-                                   nfev=int(N_fun_eval), njev=int(N_fun_eval),
+    # NB: jac contains the gradient of the LOG function w.r.t. the LOGS of the
+    # parameters
+    result = sciopt.OptimizeResult(x=np.asarray(P_n), fun=float(NLL_n),
+                                   jac=np.asarray(grad_n), nit=int(n),
+                                   # +1 to count the intial guess
+                                   nfev=int(n+1), njev=int(n+1),
                                    success=bool(converged), status=status, 
                                    message=message, history=history)
     
@@ -159,7 +182,7 @@ def log_likelihood(beta, beta_mean, Sigma):
     # x^T * A^-1 * x = x^T * y, where y is the solution of Ay = x
     # since I'm already calculating Cholesky's decomposition of Sigma
     # (True: the matrix passed is the lower tridiagonal, not the upper tridiagonal)
-    y = jnp.scipy.linalg.cho_solve((R_chol, True), beta-beta_mean)
+    y = jsl.cho_solve((R_chol, True), beta-beta_mean)
     L3 = 0.5 * (beta-beta_mean).T @ y
     L = - (L1 + L2 + L3)
     return L

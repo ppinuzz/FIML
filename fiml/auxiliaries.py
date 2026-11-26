@@ -23,7 +23,6 @@ import yaml
 import re
 import random
 import fiml.objects as objs
-from fiml.fiml import propagate_covariance_beta
 from types import SimpleNamespace
 
 
@@ -553,7 +552,7 @@ def _read_machine_learning_input(input_data, train_file, case_type, test_file=No
                 MAP_obj = cloudpickle.loads(jnp.asarray(file[case_name]))
                 params = _read_dir_name(case_name, case_type)
                 sim_obj = objs.SimulationML(case_id=case_name, params=params,
-                                            MAP=MAP_obj)
+                                            FI=MAP_obj)
                 test_data.append(sim_obj)
     
     ML_obj = objs.DataML(training=tuple(train_data), test=tuple(test_data))
