@@ -55,6 +55,7 @@ def check_msg(message):
 def check_optimiser_results(opt, SCIPY=True):
     success = True
     check_msg(f'Cost function value at MAP point     : {opt.fun}\n'
+              f'Gradient norm at MAP point           : {jnp.linalg.norm(opt.jac)}\n'
               f'Number of optimiser iterations       : {opt.nit}\n'
               f'Number of cost function evaluations  : {opt.nfev}\n'
               f'Number of Jacobian evaluations       : {opt.njev}')
@@ -595,14 +596,15 @@ def _read_file_or_obj(input_obj, msg=''):
     if isinstance(input_obj, Path) or isinstance(input_obj, str):
         input_obj = Path(input_obj)
         print(f'Reading {msg} \n\t{input_obj.resolve()}')
-        with open(input_obj, 'r') as file:
-            match input_obj.suffix:
-                case '.yaml':
+        match input_obj.suffix:
+            case '.yaml':
+                with open(input_obj, 'r') as file:
                     input_data = yaml.safe_load(file)
-                case '.pkl':
+            case '.pkl':
+                with open(input_obj, 'rb') as file:
                     input_data = cloudpickle.load(file)
-                case _:
-                    raise ValueError(f"Unknown file extension {input_obj.suffix}")
+            case _:
+                raise ValueError(f"Unknown file extension {input_obj.suffix}")
     elif isinstance(input_obj, dict):
         input_data = input_obj.copy()
     else:

@@ -115,9 +115,8 @@ def parametrise_beta(opts, x_mesh, t_mesh, STEADY):
     
     # condition number can be calculated once and for all only if Phi depends
     # solely on x
-    if opts['model'] in {'BxBt', 'BxBt_softplus', 'BxBt_exp', 'RBF_Gauss_x', 
-                         'RBF_Gauss_x_softplus', 'RBF_Gauss_x_poly', 
-                         'RBF_Gauss_x_poly_softplus'}:
+    if opts['model'] in {'RBF_Gauss_x', 'RBF_Gauss_x_softplus', 
+                         'RBF_Gauss_x_poly', 'RBF_Gauss_x_poly_softplus'}:
         # with big matrices (e.g. 100.000 x 11), jnp.linalg.cond() calculates
         # the full SVD => not enough memory => calculate it using the definition
         #   compute_uv=False        returns only the singular values

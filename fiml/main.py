@@ -376,12 +376,14 @@ def field_inversion(exp_data, problem, cost_fun_obj, beta_opts, analysis_obj,
                 # function that returns only the solution, to avoid having JAX
                 # differentiating w.r.t. the flag
                 H_MAP = fiml.Gauss_Newton_hessian(lambda theta: h_theta(theta)[0], 
-                                                  FIML.MAP.theta, cost_fun_obj.C_data, cost_fun_obj.C_theta)
+                                                  FIML.MAP.theta, cost_fun_obj.C_data, cost_fun_obj.C_theta,
+                                                  cost_fun_obj.W_reg)
             case 'test':
                 aux.warning('Calculating the Hessian matrix using all available options...')
                 H_MAP_full = jax.jacfwd(jax.jacfwd(cost_with_aux, has_aux=True), has_aux=True)(FIML.MAP.theta)[0]
                 H_MAP_GN = fiml.Gauss_Newton_hessian(lambda theta: h_theta(theta)[0], 
-                                                     FIML.MAP.theta, cost_fun_obj.C_data, cost_fun_obj.C_theta)
+                                                     FIML.MAP.theta, cost_fun_obj.C_data, cost_fun_obj.C_theta,
+                                                     cost_fun_obj.W_reg)
                 err_GN = jnp.linalg.norm(H_MAP_GN - H_MAP_full) / jnp.linalg.norm(H_MAP_full)
                 aux.warning(f'Gauss-Newton vs Exact Frobenius-norm error: {err_GN:.5e}')
                 H_MAP = H_MAP_full
@@ -528,7 +530,12 @@ def machine_learning(input_obj, data_obj):
                                            max_iter=input_obj.optimisation.max_iterations,
                                            method=input_obj.optimisation.optimiser)
         aux.check_optimiser_results(opt)
-        
+        print(f'Beta mean                   : {GP_opt.beta_mean}\n'
+              f'RBF amplitude               : {GP_opt.parameters[0]}\n'
+              f'RBF physical length scale   : {GP_opt.parameters[1]*GP_opt.normalisation_std}\n'
+              f'RBF normalised length scale : {GP_opt.parameters[1]}\n'
+              f'Sigma error                 : {GP_opt.parameters[2]}')
+
 # =============================================================================
 #         hdf5_group = out_file.create_group('mesh')
 #         tmp_set = hdf5_group.create_dataset(name='x', data=x_mesh, **comprex_opts)
@@ -570,7 +577,7 @@ def postprocessing(FIML, exp_data, problem, out_dir, sol_exact=None):
         # compare prior, posterior and MAP beta correction to the exact one
          post.compare_exact_beta((FIML.prior, FIML.MAP, FIML.posterior), sol_exact, 
                                  t_plot=sol_exact.t[-1], fig_file=out_dir/'checkBeta', 
-                                 beta_labels=('Prior', 'Posterior', 'MAP'))
+                                 beta_labels=('Prior', 'MAP', 'Posterior'))
          
          # check if the parametrisation is able to reproduce the exact beta
          theta_ex = post.check_parametrisation_fitness(sol_exact, FIML.beta_opts,

@@ -41,7 +41,7 @@ class Mesh:
     dt: float | None = None
     
     def __post_init__(self):
-        if self.dx < 0:
+        if self.dx <= 0:
             raise ValueError('Mesh element size cannot be negative!')
         if self.dt is None:
             warning('No time step provided, the problem will be treated as steady')
@@ -104,8 +104,8 @@ class FieldInversion:
     variance_observational: float | str
     files: FilesFI
     # create a new Mesh instance if no value is supplied
-    mesh: Mesh = field(default_factory=Mesh)
-    beta: Beta = field(default_factory=Beta)
+    mesh: Mesh
+    beta: Beta
     optimisation: Optimisation = field(default_factory=Optimisation)
     options: FieldInversionOptions = field(default_factory=FieldInversionOptions)
     steady: bool = True
